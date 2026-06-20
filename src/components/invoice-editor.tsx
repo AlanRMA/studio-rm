@@ -2,12 +2,13 @@
 'use client';
 
 import type { FC } from 'react';
-import { useCallback, useEffect } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PlusCircle, Trash2 } from 'lucide-react';
 import type { Invoice } from '@/lib/types';
 import { invoiceSchema } from '@/lib/types';
+import { formatInvoiceValidationError, validateInvoiceForSave } from '@/lib/invoice-validation';
 import { useDropdownLists } from '@/hooks/use-dropdown-lists';
 import { CustomItemSelect } from '@/components/custom-item-select';
 import { ItemRowErrors } from '@/components/item-row-errors';
@@ -27,12 +28,19 @@ import {
   type AdjustmentKind,
 } from '@/lib/utils';
 
+export interface InvoiceEditorHandle {
+  validateForSave: () => Promise<
+    { ok: true; invoice: Invoice } | { ok: false; message: string }
+  >;
+}
+
 interface InvoiceEditorProps {
   invoice: Invoice;
   onInvoiceChange: (invoice: Invoice) => void;
 }
 
-export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange }) => {
+export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>(
+  function InvoiceEditor({ invoice, onInvoiceChange }, ref) {
   const { tipoItems, descricaoItems, addItem } = useDropdownLists();
 
   const form = useForm<Invoice>({
@@ -57,10 +65,25 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
   const adjustmentValue = form.watch('adjustment');
   const adjustmentKind = getAdjustmentKind(adjustmentValue || 0);
 
+  useImperativeHandle(ref, () => ({
+    validateForSave: async () => {
+      await form.trigger();
+      const values = form.getValues() as Invoice;
+      const result = validateInvoiceForSave(values);
+      if (!result.success) {
+        return { ok: false, message: formatInvoiceValidationError(result.error) };
+      }
+      return { ok: true, invoice: result.data };
+    },
+  }));
+
   const publishInvoiceChange = useCallback(() => {
     form.trigger().then((isValid) => {
       if (isValid) {
-        onInvoiceChange(form.getValues() as Invoice);
+        const parsed = validateInvoiceForSave(form.getValues() as Invoice);
+        if (parsed.success) {
+          onInvoiceChange(parsed.data);
+        }
       }
     });
   }, [form, onInvoiceChange]);
@@ -101,7 +124,10 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
       if (type === 'change') {
         form.trigger().then((isValid) => {
           if (isValid) {
-            onInvoiceChange(value as Invoice);
+            const parsed = validateInvoiceForSave(value as Invoice);
+            if (parsed.success) {
+              onInvoiceChange(parsed.data);
+            }
           }
         });
       }
@@ -507,4 +533,4 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
       </form>
     </Form>
   );
-};
+});

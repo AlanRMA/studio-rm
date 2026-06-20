@@ -3,9 +3,21 @@
 
 import type { FC } from 'react';
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Download, FilePlus, FileText, Save, Search, Settings } from 'lucide-react';
+import type { InvoiceEditorHandle } from '@/components/invoice-editor';
+import {
+  BarChart3,
+  CheckCircle2,
+  Download,
+  FilePlus,
+  FileText,
+  Save,
+  Search,
+  Settings,
+} from 'lucide-react';
+import Link from 'next/link';
 import { format } from 'date-fns';
 import type { Invoice, SavedExport, SaveFormat } from '@/lib/types';
+import { submitReceiptToBackend } from '@/lib/receipt-ingest';
 import { useLocalStorage } from '@/hooks/use-local-storage';
 import { useToast } from '@/hooks/use-toast';
 import { DEFAULT_SAVE_FORMAT, STORAGE_KEYS } from '@/lib/constants';
@@ -92,6 +104,13 @@ const Page: FC = () => {
     []
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<{
+    clientName: string;
+    format: SaveFormat;
+    syncStatus: 'synced' | 'queued' | 'failed';
+  } | null>(null);
+
+  const isSaveLocked = isSaving || saveSuccess !== null;
 
   const [currentInvoice, setCurrentInvoice] = useState<Invoice>(() =>
     createDefaultInvoice(companyName)
@@ -128,6 +147,7 @@ const Page: FC = () => {
   }, [isClient, companyName]);
 
   const previewRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<InvoiceEditorHandle>(null);
 
   const handleNewInvoice = () => {
     const newInvoice = createDefaultInvoice(companyName);
@@ -212,9 +232,26 @@ const Page: FC = () => {
     }
   }, [currentInvoice.clientName, getExportFilename, toast]);
 
+  const handleDismissSaveSuccess = useCallback(() => {
+    setSaveSuccess(null);
+    setActiveTab('notas');
+  }, []);
+
   const handleSaveExport = useCallback(async () => {
     const node = previewRef.current;
-    if (!node || isSaving) return;
+    if (!node || isSaveLocked) return;
+
+    const validation = await editorRef.current?.validateForSave();
+    if (!validation?.ok) {
+      toast({
+        variant: 'destructive',
+        title: 'Recibo incompleto',
+        description: validation?.message ?? 'Preencha todos os campos obrigatórios.',
+      });
+      return;
+    }
+
+    const invoice = validation.invoice;
 
     setIsSaving(true);
     try {
@@ -231,9 +268,9 @@ const Page: FC = () => {
 
       const saved: SavedExport = {
         id: generateId(),
-        invoiceId: currentInvoice.id,
-        clientName: currentInvoice.clientName || 'sem-cliente',
-        invoiceNumber: currentInvoice.invoiceNumber,
+        invoiceId: invoice.id,
+        clientName: invoice.clientName,
+        invoiceNumber: invoice.invoiceNumber,
         format,
         data,
         createdAt: new Date().toISOString(),
@@ -241,11 +278,17 @@ const Page: FC = () => {
 
       setSavedExports((prev) => [saved, ...prev]);
 
-      setActiveTab('notas');
+      const ingestResult = await submitReceiptToBackend(invoice, saved);
+      const syncStatus: 'synced' | 'queued' | 'failed' = !ingestResult.ok
+        ? 'failed'
+        : ingestResult.status === 'queued'
+          ? 'queued'
+          : 'synced';
 
-      toast({
-        title: 'Salvo em Minhas Notas',
-        description: `Recibo salvo como ${format.toUpperCase()}.`,
+      setSaveSuccess({
+        clientName: invoice.clientName,
+        format,
+        syncStatus,
       });
     } catch (error) {
       console.error(error);
@@ -258,10 +301,8 @@ const Page: FC = () => {
       setIsSaving(false);
     }
   }, [
-    currentInvoice.clientName,
-    currentInvoice.id,
-    currentInvoice.invoiceNumber,
-    isSaving,
+    currentInvoice,
+    isSaveLocked,
     saveFormat,
     setSavedExports,
     toast,
@@ -319,6 +360,12 @@ const Page: FC = () => {
           Gerador de Nota de Pagamento
         </h1>
         <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/dashboard">
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Dashboard
+            </Link>
+          </Button>
           <Button onClick={handleNewInvoice}>
             <FilePlus /> Nova Nota
           </Button>
@@ -340,6 +387,7 @@ const Page: FC = () => {
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 xl:gap-8 min-w-0">
               <div className="min-w-0">
                 <InvoiceEditor
+                  ref={editorRef}
                   key={currentInvoice.id}
                   invoice={currentInvoice}
                   onInvoiceChange={handleInvoiceChange}
@@ -354,8 +402,8 @@ const Page: FC = () => {
                     variant="outline"
                     size="sm"
                     onClick={handleSaveExport}
-                    disabled={isSaving}
-                    className="bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black border-yellow-600"
+                    disabled={isSaveLocked}
+                    className="bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black border-yellow-600 disabled:opacity-70"
                   >
                     <Save className="h-4 w-4 mr-2" />
                     {isSaving ? 'Salvando...' : 'Salvar'}
@@ -430,6 +478,41 @@ const Page: FC = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      <AlertDialog
+        open={saveSuccess !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) handleDismissSaveSuccess();
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="h-10 w-10 text-green-600 shrink-0" />
+              <div>
+                <AlertDialogTitle className="text-xl">Salvo com sucesso!</AlertDialogTitle>
+                <AlertDialogDescription className="mt-1 text-base">
+                  O recibo de <strong>{saveSuccess?.clientName}</strong> foi salvo como{' '}
+                  <strong>{saveSuccess?.format.toUpperCase()}</strong> em Minhas Notas.
+                  {saveSuccess?.syncStatus === 'synced'
+                    ? ' Os dados também foram enviados ao sistema.'
+                    : saveSuccess?.syncStatus === 'queued'
+                      ? ' Os dados serão sincronizados com o sistema em breve.'
+                      : ' O arquivo foi salvo, mas o envio ao servidor falhou. Tente salvar novamente mais tarde.'}
+                </AlertDialogDescription>
+              </div>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={handleDismissSaveSuccess}
+              className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+            >
+              Ver Minhas Notas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={exportToDelete !== null}
