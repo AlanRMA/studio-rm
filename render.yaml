@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: receipt-backend-rosania
+    runtime: node
+    plan: free
+    rootDir: receipt-backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/v1/ingest/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: production
+      - key: INGEST_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: DUPLICATE_WINDOW_MS
+        value: 5000
+      - key: FLUSH_INTERVAL_MS
+        value: 10000
