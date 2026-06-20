@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
+import { getReceiptApiKey, receiptApiPath } from '@/lib/receipt-api-config';
 
-const RECEIPT_API_URL = process.env.RECEIPT_API_URL ?? 'http://localhost:4000';
-const RECEIPT_API_KEY = process.env.RECEIPT_API_KEY ?? '';
+const RECEIPT_API_KEY = getReceiptApiKey();
 
 export async function POST(request: Request) {
   if (!RECEIPT_API_KEY) {
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   const body = await request.text();
 
   try {
-    const response = await fetch(`${RECEIPT_API_URL}/api/v1/ingest/rosania/receipt`, {
+    const response = await fetch(receiptApiPath('/api/v1/ingest/rosania/receipt'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
