@@ -129,14 +129,15 @@ export async function generateInvoicePdfData(
 
 export async function downloadInvoicePdf(node: HTMLDivElement, filename: string) {
   const { dataUrl } = await generateInvoicePdfData(node);
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = filename;
-  link.click();
+  downloadDataUrl(dataUrl, filename);
 }
 
 export async function downloadInvoiceJpeg(node: HTMLDivElement, filename: string) {
   const { dataUrl } = await captureInvoiceImage(node);
+  downloadDataUrl(dataUrl, filename);
+}
+
+export function downloadDataUrl(dataUrl: string, filename: string) {
   const link = document.createElement('a');
   link.href = dataUrl;
   link.download = filename;

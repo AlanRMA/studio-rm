@@ -24,6 +24,7 @@ import { DEFAULT_SAVE_FORMAT, LEGACY_PLACEHOLDER_VALUES, STORAGE_KEYS } from '@/
 import { generateId } from '@/lib/utils';
 import {
   captureInvoiceImage,
+  downloadDataUrl,
   downloadInvoiceJpeg,
   downloadInvoicePdf,
   generateInvoicePdfData,
@@ -194,118 +195,94 @@ const Page: FC = () => {
     []
   );
 
-  const handleDownloadImage = useCallback(async () => {
-    const node = previewRef.current;
-    if (!node) return;
-    try {
-      await downloadInvoiceJpeg(
-        node,
-        getExportFilename(currentInvoice.clientName, 'jpeg')
-      );
-    } catch (err) {
-      console.error(err);
-      toast({
-        variant: 'destructive',
-        title: 'Falha no Download',
-        description: 'Não foi possível gerar a imagem JPEG.',
-      });
-    }
-  }, [currentInvoice.clientName, getExportFilename, toast]);
-
-  const handleDownloadPdf = useCallback(async () => {
-    const node = previewRef.current;
-    if (!node) return;
-
-    try {
-      await downloadInvoicePdf(
-        node,
-        getExportFilename(currentInvoice.clientName, 'pdf')
-      );
-    } catch (error) {
-      console.error('oops, something went wrong!', error);
-      toast({
-        variant: 'destructive',
-        title: 'Falha no PDF',
-        description: 'Não foi possível gerar o arquivo PDF.',
-      });
-    }
-  }, [currentInvoice.clientName, getExportFilename, toast]);
+  const getReceiptLabel = useCallback((invoice: Invoice) => {
+    return invoice.clientName || invoice.companyName || 'nota';
+  }, []);
 
   const handleDismissSaveSuccess = useCallback(() => {
     setSaveSuccess(null);
     setActiveTab('notas');
   }, []);
 
-  const handleSaveExport = useCallback(async () => {
-    const node = previewRef.current;
-    if (!node || isSaveLocked) return;
+  const handleSaveExport = useCallback(
+    async (options?: { downloadFormat?: SaveFormat }) => {
+      const node = previewRef.current;
+      if (!node || isSaveLocked) return;
 
-    const validation = await editorRef.current?.validateForSave();
-    if (!validation?.ok) {
-      toast({
-        variant: 'destructive',
-        title: 'Recibo incompleto',
-        description: validation?.message ?? 'Preencha todos os campos obrigatórios.',
-      });
-      return;
-    }
-
-    const invoice = validation.invoice;
-
-    setIsSaving(true);
-    try {
-      const format = saveFormat;
-      let data: string;
-
-      if (format === 'pdf') {
-        const result = await generateInvoicePdfData(node);
-        data = result.dataUrl;
-      } else {
-        const result = await captureInvoiceImage(node);
-        data = result.dataUrl;
+      const validation = await editorRef.current?.validateForSave();
+      if (!validation?.ok) {
+        toast({
+          variant: 'destructive',
+          title: 'Recibo incompleto',
+          description: validation?.message ?? 'Preencha todos os campos obrigatórios.',
+        });
+        return;
       }
 
-      const saved: SavedExport = {
-        id: generateId(),
-        invoiceId: invoice.id,
-        clientName: invoice.clientName,
-        invoiceNumber: invoice.invoiceNumber,
-        format,
-        data,
-        createdAt: new Date().toISOString(),
-      };
+      const invoice = validation.invoice;
+      const receiptLabel = getReceiptLabel(invoice);
 
-      setSavedExports((prev) => [saved, ...prev]);
+      setIsSaving(true);
+      try {
+        const format = saveFormat;
+        let data: string;
 
-      const ingestResult = await submitReceiptToBackend(invoice, saved);
-      const syncStatus: 'synced' | 'queued' | 'failed' = !ingestResult.ok
-        ? 'failed'
-        : ingestResult.status === 'queued'
-          ? 'queued'
-          : 'synced';
+        if (format === 'pdf') {
+          const result = await generateInvoicePdfData(node);
+          data = result.dataUrl;
+        } else {
+          const result = await captureInvoiceImage(node);
+          data = result.dataUrl;
+        }
 
-      setSaveSuccess({
-        clientName: invoice.clientName,
-        format,
-        syncStatus,
-      });
-    } catch (error) {
-      console.error(error);
-      toast({
-        variant: 'destructive',
-        title: 'Falha ao salvar',
-        description: 'Não foi possível gerar e salvar o arquivo.',
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  }, [
-    currentInvoice,
-    isSaveLocked,
-    saveFormat,
-    setSavedExports,
-    toast,
-  ]);
+        const saved: SavedExport = {
+          id: generateId(),
+          invoiceId: invoice.id,
+          clientName: receiptLabel,
+          invoiceNumber: invoice.invoiceNumber,
+          format,
+          data,
+          createdAt: new Date().toISOString(),
+        };
+
+        setSavedExports((prev) => [saved, ...prev]);
+
+        const ingestResult = await submitReceiptToBackend(invoice, saved);
+        const syncStatus: 'synced' | 'queued' | 'failed' = !ingestResult.ok
+          ? 'failed'
+          : ingestResult.status === 'queued'
+            ? 'queued'
+            : 'synced';
+
+        if (options?.downloadFormat) {
+          const filename = getExportFilename(receiptLabel, options.downloadFormat);
+          if (options.downloadFormat === format) {
+            downloadDataUrl(data, filename);
+          } else if (options.downloadFormat === 'pdf') {
+            await downloadInvoicePdf(node, filename);
+          } else {
+            await downloadInvoiceJpeg(node, filename);
+          }
+        }
+
+        setSaveSuccess({
+          clientName: receiptLabel,
+          format,
+          syncStatus,
+        });
+      } catch (error) {
+        console.error(error);
+        toast({
+          variant: 'destructive',
+          title: 'Falha ao salvar',
+          description: 'Não foi possível gerar e salvar o arquivo.',
+        });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [getExportFilename, getReceiptLabel, isSaveLocked, saveFormat, setSavedExports, toast]
+  );
 
   const handleSettingsSaved = useCallback(
     (snapshot: { logo: string | null; saveFormat: SaveFormat }) => {
@@ -410,7 +387,7 @@ const Page: FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleSaveExport}
+                    onClick={() => void handleSaveExport()}
                     disabled={isSaveLocked}
                     className="bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black border-yellow-600 disabled:opacity-70"
                   >
@@ -420,20 +397,22 @@ const Page: FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleDownloadImage}
-                    className="bg-green-600 text-white hover:bg-green-700 hover:text-white"
+                    onClick={() => void handleSaveExport({ downloadFormat: 'jpeg' })}
+                    disabled={isSaveLocked}
+                    className="bg-green-600 text-white hover:bg-green-700 hover:text-white disabled:opacity-70"
                   >
                     <Download className="h-4 w-4 mr-2" />
-                    Gerar JPEG
+                    {isSaving ? 'Salvando...' : 'Baixar JPEG'}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleDownloadPdf}
-                    className="bg-green-600 text-white hover:bg-green-700 hover:text-white"
+                    onClick={() => void handleSaveExport({ downloadFormat: 'pdf' })}
+                    disabled={isSaveLocked}
+                    className="bg-green-600 text-white hover:bg-green-700 hover:text-white disabled:opacity-70"
                   >
                     <FileText className="h-4 w-4 mr-2" />
-                    Gerar PDF
+                    {isSaving ? 'Salvando...' : 'Baixar PDF'}
                   </Button>
                 </div>
               </div>
