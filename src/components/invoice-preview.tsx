@@ -86,7 +86,7 @@ export const InvoicePreview = forwardRef<HTMLDivElement, InvoicePreviewProps>(({
           </div>
           <div className="text-right min-w-0">
             <p className="text-xs text-gray-500 mb-1">TIPO DE SERVIÇO</p>
-            <p className="font-bold break-words">{invoice.service || 'Serviço Prestado'}</p>
+            <p className="font-bold break-words">{invoice.service || 'Tipo de serviço'}</p>
           </div>
         </div>
 

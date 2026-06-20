@@ -5,11 +5,19 @@ export const STORAGE_KEYS = {
   logo: 'rj-notas-logo',
   invoices: 'rj-notas-invoices',
   companyName: 'rj-notas-company-name',
+  empresaList: 'rj-notas-empresa-list',
   tipoList: 'rj-notas-tipo-list',
   descricaoList: 'rj-notas-descricao-list',
   saveFormat: 'rj-notas-save-format',
   savedExports: 'rj-notas-saved-exports',
 } as const;
+
+/** Valores antigos que não devem permanecer como texto preenchido */
+export const LEGACY_PLACEHOLDER_VALUES = [
+  'Sua Empresa',
+  'Sua Empresa Inc.',
+  'Serviço Prestado',
+] as const;
 
 import type { SaveFormat } from '@/lib/types';
 
@@ -28,6 +36,8 @@ export const DEFAULT_DESCRICAO_ITEMS = [
   'Calça',
   'Saia',
 ];
+
+export const DEFAULT_EMPRESA_ITEMS: string[] = [];
 
 export const EMITTER_DATA = {
   cpf: {

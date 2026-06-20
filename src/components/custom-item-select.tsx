@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { ClearOnFocusInput } from '@/components/clear-on-focus-input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { MAX_CUSTOM_ITEM_LENGTH, NOVO_PLUS_VALUE } from '@/lib/constants';
@@ -103,13 +103,14 @@ export function CustomItemSelect({
             <DialogTitle>Novo item — {label}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
-            <Input
+            <ClearOnFocusInput
               value={newItemValue}
               onChange={(e) => {
                 setNewItemValue(e.target.value.slice(0, MAX_CUSTOM_ITEM_LENGTH));
                 setError('');
               }}
-              placeholder={`Máximo ${MAX_CUSTOM_ITEM_LENGTH} caracteres`}
+              placeholder="Digite o nome do item"
+              clearOnFocusValues={[`Máximo ${MAX_CUSTOM_ITEM_LENGTH} caracteres`]}
               maxLength={MAX_CUSTOM_ITEM_LENGTH}
               onKeyDown={(e) => e.key === 'Enter' && handleCreateItem()}
             />

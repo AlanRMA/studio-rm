@@ -40,7 +40,7 @@ export function SettingsPanel({
   onClearInvoices,
   onClearSavedExports,
 }: SettingsPanelProps) {
-  const { tipoItems, descricaoItems, deleteItem, reorderItems } = useDropdownLists();
+  const { tipoItems, descricaoItems, empresaItems, deleteItem, reorderItems } = useDropdownLists();
   const [saveFormat, setSaveFormat] = useLocalStorage<SaveFormat>(
     STORAGE_KEYS.saveFormat,
     DEFAULT_SAVE_FORMAT
@@ -48,6 +48,7 @@ export function SettingsPanel({
 
   const tipoManageable = tipoItems.filter((item) => item !== NOVO_PLUS_VALUE);
   const descricaoManageable = descricaoItems.filter((item) => item !== NOVO_PLUS_VALUE);
+  const empresaManageable = empresaItems.filter((item) => item !== NOVO_PLUS_VALUE);
 
   const handleDownloadDrafts = () => {
     const data = JSON.stringify(invoices, null, 2);
@@ -105,6 +106,23 @@ export function SettingsPanel({
               <Label htmlFor="save-pdf">PDF (documento)</Label>
             </div>
           </RadioGroup>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-headline">Lista de Empresas</CardTitle>
+          <CardDescription>
+            Gerencie as empresas do dropdown Empresa do Cliente. Arraste para reordenar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SortableItemList
+            items={empresaManageable}
+            onDelete={(item) => deleteItem('empresa', item)}
+            onReorder={(from, to) => reorderItems('empresa', from, to)}
+            emptyMessage="Nenhuma empresa cadastrada. Use NOVO+ no editor para adicionar."
+          />
         </CardContent>
       </Card>
 

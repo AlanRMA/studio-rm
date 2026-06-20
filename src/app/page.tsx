@@ -20,7 +20,7 @@ import type { Invoice, SavedExport, SaveFormat } from '@/lib/types';
 import { submitReceiptToBackend } from '@/lib/receipt-ingest';
 import { useLocalStorage } from '@/hooks/use-local-storage';
 import { useToast } from '@/hooks/use-toast';
-import { DEFAULT_SAVE_FORMAT, STORAGE_KEYS } from '@/lib/constants';
+import { DEFAULT_SAVE_FORMAT, LEGACY_PLACEHOLDER_VALUES, STORAGE_KEYS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
 import {
   captureInvoiceImage,
@@ -48,11 +48,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-const createDefaultInvoice = (defaultCompanyName: string): Invoice => ({
+const createDefaultInvoice = (): Invoice => ({
   id: generateId(),
   invoiceNumber: generateId(),
   clientName: '',
-  service: 'Serviço Prestado',
+  service: '',
   issueDate: format(new Date(), 'yyyy-MM-dd'),
   items: [
     {
@@ -66,7 +66,7 @@ const createDefaultInvoice = (defaultCompanyName: string): Invoice => ({
       isRisk: false,
     },
   ],
-  companyName: defaultCompanyName || 'Sua Empresa',
+  companyName: '',
   showEmitter: false,
   emitterDocumentType: null,
   pricePerMeter: 0,
@@ -74,9 +74,17 @@ const createDefaultInvoice = (defaultCompanyName: string): Invoice => ({
   adjustment: 0,
 });
 
+function clearLegacyPlaceholder(value: string): string {
+  return LEGACY_PLACEHOLDER_VALUES.includes(value as (typeof LEGACY_PLACEHOLDER_VALUES)[number])
+    ? ''
+    : value;
+}
+
 function migrateInvoice(invoice: Invoice): Invoice {
   return {
     ...invoice,
+    companyName: clearLegacyPlaceholder(invoice.companyName ?? ''),
+    service: clearLegacyPlaceholder(invoice.service ?? ''),
     showEmitter: invoice.showEmitter ?? false,
     emitterDocumentType: invoice.emitterDocumentType ?? null,
     items: invoice.items.map((item) => ({
@@ -91,10 +99,6 @@ const Page: FC = () => {
   const { toast } = useToast();
   const [logo, setLogo] = useLocalStorage<string | null>(STORAGE_KEYS.logo, null);
   const [invoices, setInvoices] = useLocalStorage<Invoice[]>(STORAGE_KEYS.invoices, []);
-  const [companyName, setCompanyName] = useLocalStorage<string>(
-    STORAGE_KEYS.companyName,
-    'Sua Empresa'
-  );
   const [saveFormat] = useLocalStorage<SaveFormat>(
     STORAGE_KEYS.saveFormat,
     DEFAULT_SAVE_FORMAT
@@ -112,9 +116,7 @@ const Page: FC = () => {
 
   const isSaveLocked = isSaving || saveSuccess !== null;
 
-  const [currentInvoice, setCurrentInvoice] = useState<Invoice>(() =>
-    createDefaultInvoice(companyName)
-  );
+  const [currentInvoice, setCurrentInvoice] = useState<Invoice>(() => createDefaultInvoice());
 
   const [isClient, setIsClient] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -138,19 +140,19 @@ const Page: FC = () => {
           setCurrentInvoice(migrated[0]);
         }
       } else {
-        const initialInvoice = createDefaultInvoice(companyName);
+        const initialInvoice = createDefaultInvoice();
         setCurrentInvoice(initialInvoice);
         setInvoices([initialInvoice]);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClient, companyName]);
+  }, [isClient]);
 
   const previewRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<InvoiceEditorHandle>(null);
 
   const handleNewInvoice = () => {
-    const newInvoice = createDefaultInvoice(companyName);
+    const newInvoice = createDefaultInvoice();
     const updatedInvoices = [newInvoice, ...invoices];
     setInvoices(updatedInvoices);
     setCurrentInvoice(newInvoice);
@@ -163,10 +165,6 @@ const Page: FC = () => {
 
   const handleInvoiceChange = useCallback(
     (updatedInvoice: Invoice) => {
-      if (updatedInvoice.companyName !== companyName) {
-        setCompanyName(updatedInvoice.companyName);
-      }
-
       const finalInvoice = {
         ...updatedInvoice,
         issueDate: format(new Date(), 'yyyy-MM-dd'),
@@ -184,7 +182,7 @@ const Page: FC = () => {
         return [finalInvoice, ...prevInvoices];
       });
     },
-    [companyName, setCompanyName, setInvoices]
+    [setInvoices]
   );
 
   const getExportFilename = useCallback(
@@ -309,7 +307,7 @@ const Page: FC = () => {
   ]);
 
   const handleClearInvoices = () => {
-    const newInvoice = createDefaultInvoice(companyName);
+    const newInvoice = createDefaultInvoice();
     setInvoices([newInvoice]);
     setCurrentInvoice(newInvoice);
     setActiveTab('editor');

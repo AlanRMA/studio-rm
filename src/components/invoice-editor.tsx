@@ -11,7 +11,9 @@ import { invoiceSchema } from '@/lib/types';
 import { formatInvoiceValidationError, validateInvoiceForSave } from '@/lib/invoice-validation';
 import { useDropdownLists } from '@/hooks/use-dropdown-lists';
 import { CustomItemSelect } from '@/components/custom-item-select';
+import { ClearOnFocusInput } from '@/components/clear-on-focus-input';
 import { ItemRowErrors } from '@/components/item-row-errors';
+import { LEGACY_PLACEHOLDER_VALUES } from '@/lib/constants';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -41,7 +43,8 @@ interface InvoiceEditorProps {
 
 export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>(
   function InvoiceEditor({ invoice, onInvoiceChange }, ref) {
-  const { tipoItems, descricaoItems, addItem } = useDropdownLists();
+  const { tipoItems, descricaoItems, empresaItems, addItem } = useDropdownLists();
+  const legacyClearValues = [...LEGACY_PLACEHOLDER_VALUES];
 
   const form = useForm<Invoice>({
     resolver: zodResolver(invoiceSchema),
@@ -203,10 +206,14 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
               control={form.control}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Nome da Empresa</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Sua Empresa Inc." {...field} />
-                  </FormControl>
+                  <CustomItemSelect
+                    label="Empresa do Cliente"
+                    value={field.value}
+                    items={empresaItems}
+                    onChange={field.onChange}
+                    onAddItem={(val) => addItem('empresa', val)}
+                    placeholder="Selecione a empresa"
+                  />
                   <FormMessage />
                 </FormItem>
               )}
@@ -218,7 +225,11 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
                 <FormItem>
                   <FormLabel>Nome do Cliente</FormLabel>
                   <FormControl>
-                    <Input placeholder="Nome do cliente" {...field} />
+                    <ClearOnFocusInput
+                      placeholder="Nome do cliente"
+                      clearOnFocusValues={legacyClearValues}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -231,7 +242,11 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
                 <FormItem>
                   <FormLabel>Tipo de Serviço</FormLabel>
                   <FormControl>
-                    <Input placeholder="Ex: Instalação de Rodapés" {...field} />
+                    <ClearOnFocusInput
+                      placeholder="Ex: Instalação de rodapés"
+                      clearOnFocusValues={legacyClearValues}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -286,7 +301,11 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
                       <FormItem className="space-y-1.5">
                         <FormLabel className={index !== 0 ? 'sr-only' : ''}>Referência</FormLabel>
                         <FormControl>
-                          <Input placeholder="Referência" {...refField} />
+                          <ClearOnFocusInput
+                            placeholder="Referência"
+                            clearOnFocusValues={legacyClearValues}
+                            {...refField}
+                          />
                         </FormControl>
                       </FormItem>
                     )}
