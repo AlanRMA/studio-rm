@@ -2,31 +2,50 @@
 'use client';
 
 import type { FC } from 'react';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PlusCircle, Trash2 } from 'lucide-react';
 import type { Invoice } from '@/lib/types';
 import { invoiceSchema } from '@/lib/types';
+import { useDropdownLists } from '@/hooks/use-dropdown-lists';
+import { CustomItemSelect } from '@/components/custom-item-select';
+import { ItemRowErrors } from '@/components/item-row-errors';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogoUploader } from '@/components/logo-uploader';
-import { Checkbox } from "@/components/ui/checkbox";
-import { formatCurrency, roundToNearestTenCents } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import {
+  applyAdjustmentSign,
+  cn,
+  getAdjustmentKind,
+  getAdjustmentMagnitude,
+  roundToNearestTenCents,
+  type AdjustmentKind,
+} from '@/lib/utils';
 
 interface InvoiceEditorProps {
   invoice: Invoice;
   onInvoiceChange: (invoice: Invoice) => void;
-  logo: string | null;
-  onLogoChange: (logo: string | null) => void;
 }
 
-export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange, logo, onLogoChange }) => {
+export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange }) => {
+  const { tipoItems, descricaoItems, addItem } = useDropdownLists();
+
   const form = useForm<Invoice>({
     resolver: zodResolver(invoiceSchema),
-    defaultValues: invoice,
+    defaultValues: {
+      ...invoice,
+      showEmitter: invoice.showEmitter ?? false,
+      emitterDocumentType: invoice.emitterDocumentType ?? null,
+      items: invoice.items.map((item) => ({
+        ...item,
+        type: item.type ?? '',
+      })),
+    },
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -34,11 +53,38 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
     name: 'items',
   });
 
-  const items = form.watch('items');
+  const showEmitter = form.watch('showEmitter');
+  const adjustmentValue = form.watch('adjustment');
+  const adjustmentKind = getAdjustmentKind(adjustmentValue || 0);
+
+  const publishInvoiceChange = useCallback(() => {
+    form.trigger().then((isValid) => {
+      if (isValid) {
+        onInvoiceChange(form.getValues() as Invoice);
+      }
+    });
+  }, [form, onInvoiceChange]);
+
+  const setAdjustmentKind = (kind: AdjustmentKind) => {
+    const magnitude = getAdjustmentMagnitude(form.getValues('adjustment'));
+    form.setValue('adjustment', applyAdjustmentSign(magnitude, kind), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    publishInvoiceChange();
+  };
+
+  const handleAdjustmentInput = (magnitude: number, kind: AdjustmentKind) => {
+    const signedValue = applyAdjustmentSign(magnitude, kind);
+    form.setValue('adjustment', signedValue, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    publishInvoiceChange();
+  };
 
   useEffect(() => {
     const subscription = form.watch((value, { name, type }) => {
-      // Auto-calculate total when quantity, unitPrice, or isRisk changes
       if (name && (name.includes('.quantity') || name.includes('.unitPrice') || name.includes('.isRisk'))) {
         const itemIndex = parseInt(name.split('.')[1], 10);
         if (!isNaN(itemIndex)) {
@@ -53,17 +99,17 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
       }
 
       if (type === 'change') {
-          form.trigger().then(isValid => {
-              if(isValid) {
-                  onInvoiceChange(value as Invoice);
-              }
-          })
+        form.trigger().then((isValid) => {
+          if (isValid) {
+            onInvoiceChange(value as Invoice);
+          }
+        });
       }
     });
     return () => subscription.unsubscribe();
   }, [form, onInvoiceChange]);
 
-  const handleNumericInput = (field: any, value: string) => {
+  const handleNumericInput = (field: { onChange: (value: number) => void }, value: string) => {
     const parsedValue = parseFloat(value);
     field.onChange(isNaN(parsedValue) ? 0 : parsedValue);
   };
@@ -73,17 +119,51 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
       <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
         <Card>
           <CardHeader>
-            <CardTitle className="font-headline">Sua Empresa</CardTitle>
+            <CardTitle className="font-headline">Emissor</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col md:flex-row gap-6">
-            <div className="flex-shrink-0">
-              <LogoUploader logo={logo} onLogoChange={onLogoChange} />
-            </div>
-            <div className="flex-grow space-y-4">
-              <FormField name="companyName" control={form.control} render={({ field }) => (
-                <FormItem><FormLabel>Nome da Empresa</FormLabel><FormControl><Input placeholder="Sua Empresa Inc." {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-            </div>
+          <CardContent className="space-y-4">
+            <FormField
+              name="showEmitter"
+              control={form.control}
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
+                  <div className="space-y-0.5">
+                    <FormLabel>Colocar CPF/CNPJ?</FormLabel>
+                    <FormDescription>Exibe os dados do emissor no cabeçalho do recibo.</FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch checked={field.value} onCheckedChange={field.onChange} />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            {showEmitter && (
+              <FormField
+                name="emitterDocumentType"
+                control={form.control}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tipo de Documento</FormLabel>
+                    <Select
+                      value={field.value ?? undefined}
+                      onValueChange={(val) => field.onChange(val as 'cpf' | 'cnpj')}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione CPF ou CNPJ" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="cpf">CPF — Rosania Moreira Aragao</SelectItem>
+                        <SelectItem value="cnpj">CNPJ — Rosania Modelista</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -92,23 +172,76 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
             <CardTitle className="font-headline">Detalhes da Nota</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-             <FormField name="clientName" control={form.control} render={({ field }) => (
-                <FormItem><FormLabel>Nome do Cliente</FormLabel><FormControl><Input placeholder="John Doe" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-             <FormField name="service" control={form.control} render={({ field }) => (
-                <FormItem><FormLabel>Tipo de Serviço</FormLabel><FormControl><Input placeholder="Ex: Instalação de Rodapés" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
+            <FormField
+              name="companyName"
+              control={form.control}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nome da Empresa</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Sua Empresa Inc." {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              name="clientName"
+              control={form.control}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nome do Cliente</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Nome do cliente" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              name="service"
+              control={form.control}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Tipo de Serviço</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ex: Instalação de Rodapés" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField name="invoiceNumber" control={form.control} render={({ field }) => (
-                  <FormItem><FormLabel>Ref. da Nota</FormLabel><FormControl><Input {...field} disabled /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField name="issueDate" control={form.control} render={({ field }) => (
-                  <FormItem><FormLabel>Data</FormLabel><FormControl><Input type="date" {...field} disabled /></FormControl><FormMessage /></FormItem>
-                )} />
+              <FormField
+                name="invoiceNumber"
+                control={form.control}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Ref. da Nota</FormLabel>
+                    <FormControl>
+                      <Input {...field} disabled />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                name="issueDate"
+                control={form.control}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Data</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} disabled />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader>
             <CardTitle className="font-headline">Itens</CardTitle>
@@ -117,66 +250,155 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
             {fields.map((field, index) => (
               <div
                 key={field.id}
-                className="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-2 items-end p-3 border rounded-md"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-start p-3 border rounded-md"
               >
-                <div className="col-span-12 md:col-span-2 space-y-1">
-                    <FormField name={`items.${index}.ref`} control={form.control} render={({ field }) => (
-                      <FormItem><FormLabel className={index !== 0 ? 'sr-only' : ''}>Referência</FormLabel><FormControl><Input placeholder="Referência" {...field} /></FormControl><FormMessage /></FormItem>
-                    )} />
+                <div className="lg:col-span-2">
+                  <FormField
+                    name={`items.${index}.ref`}
+                    control={form.control}
+                    render={({ field: refField }) => (
+                      <FormItem className="space-y-1.5">
+                        <FormLabel className={index !== 0 ? 'sr-only' : ''}>Referência</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Referência" {...refField} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
                 </div>
-                <div className="col-span-12 md:col-span-7 space-y-1">
-                    <FormField name={`items.${index}.description`} control={form.control} render={({ field }) => (
-                      <FormItem><FormLabel className={index !== 0 ? 'sr-only' : ''}>Descrição</FormLabel><FormControl><Input placeholder="Descrição do item" {...field} /></FormControl><FormMessage /></FormItem>
-                    )} />
+                <div className="lg:col-span-3">
+                  <FormField
+                    name={`items.${index}.type`}
+                    control={form.control}
+                    render={({ field: typeField }) => (
+                      <FormItem className="space-y-1.5">
+                        <CustomItemSelect
+                          label="Tipo"
+                          hideLabel={index !== 0}
+                          value={typeField.value}
+                          items={tipoItems}
+                          onChange={typeField.onChange}
+                          onAddItem={(val) => addItem('tipo', val)}
+                          placeholder="Selecione o tipo"
+                        />
+                      </FormItem>
+                    )}
+                  />
                 </div>
-                <div className="col-span-full hidden">
-                    <FormField
-                        control={form.control}
-                        name={`items.${index}.isRisk`}
-                        render={({ field }) => (
-                            <FormItem className="flex flex-row items-center space-x-2 space-y-0 mt-2">
-                                <FormControl>
-                                    <Checkbox
-                                        checked={field.value}
-                                        onCheckedChange={field.onChange}
-                                    />
-                                </FormControl>
-                                <FormLabel className="font-normal text-sm">
-                                    É um risco? (medido em cm)
-                                </FormLabel>
-                            </FormItem>
-                        )}
-                    />
+                <div className="lg:col-span-3">
+                  <FormField
+                    name={`items.${index}.description`}
+                    control={form.control}
+                    render={({ field: descField }) => (
+                      <FormItem className="space-y-1.5">
+                        <CustomItemSelect
+                          label="Descrição"
+                          hideLabel={index !== 0}
+                          value={descField.value}
+                          items={descricaoItems}
+                          onChange={descField.onChange}
+                          onAddItem={(val) => addItem('descricao', val)}
+                          placeholder="Selecione a descrição"
+                        />
+                      </FormItem>
+                    )}
+                  />
                 </div>
-                 <div className="col-span-4 space-y-1 hidden">
-                  <FormField name={`items.${index}.quantity`} control={form.control} render={({ field }) => (
-                    <FormItem><FormLabel>QUANTIDADE/COMPRIMENTO</FormLabel><FormControl><Input type="number" placeholder="1" {...field} onChange={e => handleNumericInput(field, e.target.value)} /></FormControl><FormMessage /></FormItem>
-                  )} />
+                <div className="lg:col-span-3">
+                  <FormField
+                    name={`items.${index}.total`}
+                    control={form.control}
+                    render={({ field: totalField }) => (
+                      <FormItem className="space-y-1.5">
+                        <FormLabel className={index !== 0 ? 'sr-only' : ''}>Valor Final (R$)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            {...totalField}
+                            onChange={(e) => handleNumericInput(totalField, e.target.value)}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
                 </div>
-                <div className="col-span-4 space-y-1 hidden">
-                  <FormField name={`items.${index}.unitPrice`} control={form.control} render={({ field }) => (
-                    <FormItem><FormLabel>Valor Unit. (R$)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="10,00" {...field} onChange={e => handleNumericInput(field, e.target.value)} /></FormControl><FormMessage /></FormItem>
-                  )} />
+                <div className="lg:col-span-1 flex justify-end pt-6 lg:pt-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive"
+                    onClick={() => remove(index)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
-                 <div className="col-span-12 md:col-span-2 space-y-1">
-                  <FormField name={`items.${index}.total`} control={form.control} render={({ field }) => (
-                    <FormItem><FormLabel>Valor Final (R$)</FormLabel><FormControl><Input type="number" step="0.01" {...field} onChange={e => handleNumericInput(field, e.target.value)} /></FormControl><FormMessage /></FormItem>
-                  )} />
-                </div>
-                <div className="col-span-12 md:col-span-1 flex md:items-end">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive md:w-full ml-auto"
-                      onClick={() => remove(index)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+
+                <ItemRowErrors index={index} />
+
+                <div className="hidden">
+                  <FormField
+                    control={form.control}
+                    name={`items.${index}.isRisk`}
+                    render={({ field: riskField }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Checkbox checked={riskField.value} onCheckedChange={riskField.onChange} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    name={`items.${index}.quantity`}
+                    control={form.control}
+                    render={({ field: qtyField }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            {...qtyField}
+                            onChange={(e) => handleNumericInput(qtyField, e.target.value)}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    name={`items.${index}.unitPrice`}
+                    control={form.control}
+                    render={({ field: priceField }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            {...priceField}
+                            onChange={(e) => handleNumericInput(priceField, e.target.value)}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
                 </div>
               </div>
             ))}
-            <Button type="button" variant="outline" onClick={() => append({ id: `item-${Date.now()}`, ref: '', description: '', isRisk: false, quantity: 1, unitPrice: 0, total: 0 })}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                append({
+                  id: `item-${Date.now()}`,
+                  ref: '',
+                  type: '',
+                  description: '',
+                  isRisk: false,
+                  quantity: 1,
+                  unitPrice: 0,
+                  total: 0,
+                })
+              }
+            >
               <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
             </Button>
           </CardContent>
@@ -187,17 +409,99 @@ export const InvoiceEditor: FC<InvoiceEditorProps> = ({ invoice, onInvoiceChange
             <CardTitle className="font-headline">Ajuste Final</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <FormField name="deliveryFee" control={form.control} render={({ field }) => (
-              <FormItem><FormLabel>Taxa de Entrega</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0,00" {...field} onChange={e => handleNumericInput(field, e.target.value)} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField name="adjustment" control={form.control} render={({ field }) => (
-              <FormItem>
-                <FormLabel>Desconto ou Acréscimo</FormLabel>
-                <FormControl><Input type="number" step="0.01" placeholder="0,00" {...field} onChange={e => handleNumericInput(field, e.target.value)} /></FormControl>
-                <FormDescription>Use um valor negativo para descontos (ex: -50.00).</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )} />
+            <FormField
+              name="deliveryFee"
+              control={form.control}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Taxa de Entrega</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0,00"
+                      {...field}
+                      onChange={(e) => handleNumericInput(field, e.target.value)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              name="adjustment"
+              control={form.control}
+              render={({ field }) => (
+                <FormItem>
+                  <div className="flex gap-2 mb-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={adjustmentKind === 'increase' ? 'default' : 'outline'}
+                      className={cn(
+                        'flex-1',
+                        adjustmentKind === 'increase' &&
+                          'bg-green-600 hover:bg-green-700 text-white border-green-600'
+                      )}
+                      onClick={() => setAdjustmentKind('increase')}
+                    >
+                      Acréscimo (+)
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={adjustmentKind === 'discount' ? 'default' : 'outline'}
+                      className={cn(
+                        'flex-1',
+                        adjustmentKind === 'discount' &&
+                          'bg-red-600 hover:bg-red-700 text-white border-red-600'
+                      )}
+                      onClick={() => setAdjustmentKind('discount')}
+                    >
+                      Desconto (-)
+                    </Button>
+                  </div>
+                  <FormLabel
+                    className={cn(
+                      'font-semibold',
+                      adjustmentKind === 'increase' ? 'text-green-600' : 'text-red-600'
+                    )}
+                  >
+                    {adjustmentKind === 'increase' ? 'Acréscimo (+)' : 'Desconto (-)'}
+                  </FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <span
+                        className={cn(
+                          'absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-sm',
+                          adjustmentKind === 'increase' ? 'text-green-600' : 'text-red-600'
+                        )}
+                      >
+                        {adjustmentKind === 'increase' ? '+' : '-'}
+                      </span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0,00"
+                        className="pl-8"
+                        value={getAdjustmentMagnitude(field.value)}
+                        onChange={(e) => {
+                          const parsed = parseFloat(e.target.value);
+                          const magnitude = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                          handleAdjustmentInput(magnitude, adjustmentKind);
+                        }}
+                      />
+                    </div>
+                  </FormControl>
+                  <FormDescription>
+                    Digite apenas o valor numérico. O sinal {adjustmentKind === 'increase' ? '+' : '-'} é aplicado
+                    automaticamente.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </CardContent>
         </Card>
       </form>

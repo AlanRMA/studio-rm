@@ -1,16 +1,12 @@
 'use client';
-import type { FC } from 'react';
 import { forwardRef } from 'react';
-import Image from 'next/image';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { Invoice } from '@/lib/types';
-import { formatCurrency } from '@/lib/utils';
+import { EMITTER_DATA, INVOICE_PREVIEW_WIDTH } from '@/lib/constants';
+import { formatCurrency, formatSignedAdjustment, getAdjustmentKind } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-
-const CPF = '857.154.093-49';
 
 interface InvoicePreviewProps {
   invoice: Invoice;
@@ -32,92 +28,107 @@ export const InvoicePreview = forwardRef<HTMLDivElement, InvoicePreviewProps>(({
     }
   };
 
+  const emitter =
+    invoice.showEmitter && invoice.emitterDocumentType
+      ? EMITTER_DATA[invoice.emitterDocumentType]
+      : null;
+
   return (
-    <Card 
-      ref={ref} 
-      className="invoice-preview bg-white text-black font-sans shadow-lg"
-      style={{ 
-        width: '600px',        // Largura fixa ideal para PDF
-        maxWidth: '600px',
-        margin: '0 auto',
-        padding: '32px' 
+    <Card
+      ref={ref}
+      className="invoice-preview bg-white text-black font-sans shadow-lg shrink-0"
+      style={{
+        width: `${INVOICE_PREVIEW_WIDTH}px`,
+        minWidth: `${INVOICE_PREVIEW_WIDTH}px`,
+        maxWidth: `${INVOICE_PREVIEW_WIDTH}px`,
+        padding: '24px',
+        boxSizing: 'border-box',
       }}
     >
       <CardContent className="p-0">
-        {/* Header */}
-        <header className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-6">
-          <div className="flex-1 flex items-center gap-4">
+        <header className="flex flex-row justify-between items-start gap-3 pb-6">
+          <div className="shrink-0">
             {logo ? (
-              <div className="w-32 h-32 relative flex-shrink-0">
-                <Image src={logo} alt="Logo" fill className="object-contain" />
+              <div className="w-28 h-28 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={logo} alt="Logo" className="max-w-full max-h-full object-contain" />
               </div>
             ) : (
-              <div className="w-32 h-32 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
+              <div className="w-28 h-28 bg-gray-100 rounded flex items-center justify-center">
                 <span className="text-xs text-gray-500">Logo</span>
               </div>
             )}
           </div>
 
-          <div className="text-right">
+          <div className="text-right flex-1 min-w-0">
             <h1 className="text-lg font-semibold text-blue-600">Nota de pagamento</h1>
-            <p className="text-xs text-gray-500 mt-1">Ref: {invoice.invoiceNumber}</p>
-            <p className="text-xl font-cursive text-gray-700 mt-1">Rosania Moreira Aragao</p>
-            <p className="text-sm text-gray-500">CPF: {CPF}</p>
+            <p className="text-xs text-gray-500 mt-1 break-all">Ref: {invoice.invoiceNumber}</p>
+            {emitter && (
+              <>
+                <p className="text-base font-cursive text-gray-700 mt-1 break-words">
+                  {emitter.name}
+                </p>
+                <p className="text-sm text-gray-500">
+                  {emitter.label}: {emitter.document}
+                </p>
+              </>
+            )}
             <p className="text-sm text-gray-500">{formatDate(invoice.issueDate)}</p>
           </div>
         </header>
 
         <Separator className="my-6" />
 
-        {/* Cliente e Serviço */}
         <div className="grid grid-cols-2 gap-8 mb-8">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs text-gray-500 mb-1">POR CLIENTE</p>
-            <p className="font-bold text-2xl">{invoice.clientName || 'Nome do Cliente'}</p>
+            <p className="font-bold text-2xl break-words">{invoice.clientName || 'Nome do Cliente'}</p>
           </div>
-          <div className="text-right">
+          <div className="text-right min-w-0">
             <p className="text-xs text-gray-500 mb-1">TIPO DE SERVIÇO</p>
-            <p className="font-bold">{invoice.service || 'Serviço Prestado'}</p>
+            <p className="font-bold break-words">{invoice.service || 'Serviço Prestado'}</p>
           </div>
         </div>
 
-        {/* TABELA - Muito mais controlada */}
         <div className="mb-8">
-          <Table className="w-full table-fixed border-collapse" style={{ width: '100%' }}>
-            <TableHeader>
-              <TableRow className="bg-gray-100">
-                <TableHead className="w-20 py-3 text-sm">REF.</TableHead>
-                <TableHead className="py-3 text-sm">DESCRIÇÃO</TableHead>
-                <TableHead className="w-28 py-3 text-right text-sm">VALOR FINAL</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoice.items.length > 0 ? invoice.items.map((item) => (
-                <TableRow key={item.id} className="border-b">
-                  <TableCell className="py-3 text-sm align-top">{item.ref || '-'}</TableCell>
-                  <TableCell className="py-3 text-sm align-top break-all break-words leading-tight">
-                    {item.description}
-                  </TableCell>
-                  <TableCell className="py-3 text-right font-semibold text-sm align-top">
-                    {formatCurrency(item.total || 0)}
-                  </TableCell>
-                </TableRow>
-              )) : (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center py-8 text-gray-500">
+          <table className="w-full table-fixed border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="w-[18%] py-2 px-1 text-left text-sm font-medium">REF.</th>
+                <th className="w-[18%] py-2 px-1 text-left text-sm font-medium">TIPO</th>
+                <th className="w-[40%] py-2 px-1 text-left text-sm font-medium">DESCRIÇÃO</th>
+                <th className="w-[24%] py-2 px-1 text-right text-sm font-medium">VALOR FINAL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoice.items.length > 0 ? (
+                invoice.items.map((item) => (
+                  <tr key={item.id} className="border-b border-gray-200">
+                    <td className="py-2 px-1 text-sm align-top break-words">{item.ref || '-'}</td>
+                    <td className="py-2 px-1 text-sm align-top break-words">{item.type || '-'}</td>
+                    <td className="py-2 px-1 text-sm align-top break-words leading-tight">
+                      {item.description}
+                    </td>
+                    <td className="py-2 px-1 text-right font-semibold text-sm align-top whitespace-nowrap">
+                      {formatCurrency(item.total || 0)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="text-center py-8 text-gray-500">
                     Nenhum item adicionado.
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               )}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
         </div>
 
         <Separator className="my-6" />
 
-        {/* Totais */}
         <div className="flex justify-end">
-          <div className="w-64 space-y-2">
+          <div className="w-full max-w-[16rem] space-y-2">
             <div className="flex justify-between text-sm">
               <span>Subtotal</span>
               <span>{formatCurrency(subtotal)}</span>
@@ -129,9 +140,11 @@ export const InvoicePreview = forwardRef<HTMLDivElement, InvoicePreviewProps>(({
               </div>
             )}
             {adjustment !== 0 && (
-              <div className="flex justify-between text-sm">
-                <span>{adjustment > 0 ? 'Acréscimo' : 'Desconto'}</span>
-                <span>{formatCurrency(adjustment)}</span>
+              <div className="flex justify-between text-sm text-black">
+                <span>
+                  {getAdjustmentKind(adjustment) === 'increase' ? 'Acréscimo' : 'Desconto'}
+                </span>
+                <span>{formatSignedAdjustment(adjustment)}</span>
               </div>
             )}
             <Separator />

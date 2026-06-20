@@ -3,17 +3,25 @@
 
 import type { FC } from 'react';
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Download, FilePlus, FileText, Search, X } from 'lucide-react';
-import { toJpeg } from 'html-to-image';
-import jsPDF from 'jspdf';
+import { Download, FilePlus, FileText, Save, Search, Settings } from 'lucide-react';
 import { format } from 'date-fns';
-import type { Invoice } from '@/lib/types';
+import type { Invoice, SavedExport, SaveFormat } from '@/lib/types';
 import { useLocalStorage } from '@/hooks/use-local-storage';
 import { useToast } from '@/hooks/use-toast';
+import { DEFAULT_SAVE_FORMAT, STORAGE_KEYS } from '@/lib/constants';
+import { generateId } from '@/lib/utils';
+import {
+  captureInvoiceImage,
+  downloadInvoiceJpeg,
+  downloadInvoicePdf,
+  generateInvoicePdfData,
+} from '@/lib/export-utils';
 import { Button } from '@/components/ui/button';
 import { InvoiceEditor } from '@/components/invoice-editor';
 import { InvoicePreview } from '@/components/invoice-preview';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SavedExportCard } from '@/components/saved-export-card';
+import { SettingsPanel } from '@/components/settings-panel';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,57 +34,98 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-
+} from '@/components/ui/alert-dialog';
 
 const createDefaultInvoice = (defaultCompanyName: string): Invoice => ({
-  id: crypto.randomUUID(),
-  invoiceNumber: crypto.randomUUID(),
+  id: generateId(),
+  invoiceNumber: generateId(),
   clientName: '',
   service: 'Serviço Prestado',
   issueDate: format(new Date(), 'yyyy-MM-dd'),
-  items: [{ id: `item-${Date.now()}`, ref: '', description: '', quantity: 1, unitPrice: 0, total: 0 }],
+  items: [
+    {
+      id: `item-${Date.now()}`,
+      ref: '',
+      type: '',
+      description: '',
+      quantity: 1,
+      unitPrice: 0,
+      total: 0,
+      isRisk: false,
+    },
+  ],
   companyName: defaultCompanyName || 'Sua Empresa',
+  showEmitter: false,
+  emitterDocumentType: null,
   pricePerMeter: 0,
   deliveryFee: 0,
-  adjustment: 0
+  adjustment: 0,
 });
+
+function migrateInvoice(invoice: Invoice): Invoice {
+  return {
+    ...invoice,
+    showEmitter: invoice.showEmitter ?? false,
+    emitterDocumentType: invoice.emitterDocumentType ?? null,
+    items: invoice.items.map((item) => ({
+      ...item,
+      type: item.type ?? '',
+      isRisk: item.isRisk ?? false,
+    })),
+  };
+}
 
 const Page: FC = () => {
   const { toast } = useToast();
-  const [logo, setLogo] = useLocalStorage<string | null>('rj-notas-logo', null);
-  const [invoices, setInvoices] = useLocalStorage<Invoice[]>('rj-notas-invoices', []);
-  const [companyName, setCompanyName] = useLocalStorage<string>('rj-notas-company-name', 'Sua Empresa');
-  
-  const [currentInvoice, setCurrentInvoice] = useState<Invoice>(() => createDefaultInvoice(companyName));
-  
+  const [logo, setLogo] = useLocalStorage<string | null>(STORAGE_KEYS.logo, null);
+  const [invoices, setInvoices] = useLocalStorage<Invoice[]>(STORAGE_KEYS.invoices, []);
+  const [companyName, setCompanyName] = useLocalStorage<string>(
+    STORAGE_KEYS.companyName,
+    'Sua Empresa'
+  );
+  const [saveFormat] = useLocalStorage<SaveFormat>(
+    STORAGE_KEYS.saveFormat,
+    DEFAULT_SAVE_FORMAT
+  );
+  const [savedExports, setSavedExports] = useLocalStorage<SavedExport[]>(
+    STORAGE_KEYS.savedExports,
+    []
+  );
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [currentInvoice, setCurrentInvoice] = useState<Invoice>(() =>
+    createDefaultInvoice(companyName)
+  );
+
   const [isClient, setIsClient] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('editor');
-  const [invoiceToDelete, setInvoiceToDelete] = useState<string | null>(null);
+  const [exportToDelete, setExportToDelete] = useState<string | null>(null);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
 
-  // Sync currentInvoice with local storage on initial load
   useEffect(() => {
     if (isClient) {
-        if (invoices.length > 0) {
-            // Check if currentInvoice (or its id) exists in the invoices list
-            const currentExists = invoices.some(inv => inv.id === currentInvoice.id);
-            if (!currentExists) {
-              setCurrentInvoice(invoices[0]);
-            }
-        } else {
-            const initialInvoice = createDefaultInvoice(companyName);
-            setCurrentInvoice(initialInvoice);
-            setInvoices([initialInvoice]);
+      if (invoices.length > 0) {
+        const migrated = invoices.map(migrateInvoice);
+        const needsMigration = JSON.stringify(migrated) !== JSON.stringify(invoices);
+        if (needsMigration) {
+          setInvoices(migrated);
         }
+        const currentExists = migrated.some((inv) => inv.id === currentInvoice.id);
+        if (!currentExists) {
+          setCurrentInvoice(migrated[0]);
+        }
+      } else {
+        const initialInvoice = createDefaultInvoice(companyName);
+        setCurrentInvoice(initialInvoice);
+        setInvoices([initialInvoice]);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient, companyName]);
-
 
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -92,46 +141,48 @@ const Page: FC = () => {
     setActiveTab('editor');
   };
 
-  const handleInvoiceChange = useCallback((updatedInvoice: Invoice) => {
-    // Save company name to local storage whenever it changes in the editor
-    if (updatedInvoice.companyName !== companyName) {
-      setCompanyName(updatedInvoice.companyName);
-    }
-    
-    // Always use today's date for issueDate
-    const finalInvoice = {
-      ...updatedInvoice,
-      issueDate: format(new Date(), 'yyyy-MM-dd')
-    };
+  const handleInvoiceChange = useCallback(
+    (updatedInvoice: Invoice) => {
+      if (updatedInvoice.companyName !== companyName) {
+        setCompanyName(updatedInvoice.companyName);
+      }
 
-    setCurrentInvoice(finalInvoice);
-    
-    setInvoices(prevInvoices => {
+      const finalInvoice = {
+        ...updatedInvoice,
+        issueDate: format(new Date(), 'yyyy-MM-dd'),
+      };
+
+      setCurrentInvoice(finalInvoice);
+
+      setInvoices((prevInvoices) => {
         const existingIndex = prevInvoices.findIndex((inv) => inv.id === finalInvoice.id);
         if (existingIndex > -1) {
-            const updatedInvoices = [...prevInvoices];
-            updatedInvoices[existingIndex] = finalInvoice;
-            return updatedInvoices;
+          const updatedInvoices = [...prevInvoices];
+          updatedInvoices[existingIndex] = finalInvoice;
+          return updatedInvoices;
         }
         return [finalInvoice, ...prevInvoices];
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyName, setCompanyName]);
+      });
+    },
+    [companyName, setCompanyName, setInvoices]
+  );
+
+  const getExportFilename = useCallback(
+    (clientName: string, format: SaveFormat) => {
+      const base = `nota-${clientName.replace(/\s/g, '_') || 'nota'}`;
+      return format === 'pdf' ? `${base}.pdf` : `${base}.jpeg`;
+    },
+    []
+  );
 
   const handleDownloadImage = useCallback(async () => {
     const node = previewRef.current;
     if (!node) return;
     try {
-      const dataUrl = await toJpeg(node, {
-        cacheBust: true,
-        pixelRatio: 3,
-        quality: 0.92,
-        backgroundColor: '#ffffff',
-      });
-      const link = document.createElement('a');
-      link.download = `nota-${currentInvoice.clientName.replace(/\s/g, '_') || 'nota'}.jpeg`;
-      link.href = dataUrl;
-      link.click();
+      await downloadInvoiceJpeg(
+        node,
+        getExportFilename(currentInvoice.clientName, 'jpeg')
+      );
     } catch (err) {
       console.error(err);
       toast({
@@ -140,166 +191,269 @@ const Page: FC = () => {
         description: 'Não foi possível gerar a imagem JPEG.',
       });
     }
-  }, [currentInvoice.clientName, toast]);
-  
+  }, [currentInvoice.clientName, getExportFilename, toast]);
+
   const handleDownloadPdf = useCallback(async () => {
-      const node = previewRef.current;
-      if (!node) return;
+    const node = previewRef.current;
+    if (!node) return;
 
-      try {
-          const dataUrl = await toJpeg(node, { pixelRatio: 2 });
-          
-          // Use the actual dimensions of the node for the PDF
-          const pdf = new jsPDF({
-            orientation: node.offsetWidth > node.offsetHeight ? 'l' : 'p',
-            unit: 'px',
-            format: [node.offsetWidth, node.offsetHeight]
-          });
-
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = pdf.internal.pageSize.getHeight();
-          
-          pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-          pdf.save(`nota-${currentInvoice.clientName.replace(/\s/g, '_') || 'nota'}.pdf`);
-      } catch (error) {
-          console.error('oops, something went wrong!', error);
-          toast({
-              variant: 'destructive',
-              title: 'Falha no PDF',
-              description: 'Não foi possível gerar o arquivo PDF.',
-          });
-      }
-  }, [currentInvoice.clientName, toast]);
-
-  const selectInvoiceToEdit = (invoice: Invoice) => {
-    setCurrentInvoice(invoice);
-    setActiveTab('editor');
-  }
-
-  const handleDeleteInvoice = (id: string) => {
-    const updatedInvoices = invoices.filter(inv => inv.id !== id);
-    setInvoices(updatedInvoices);
-    
-    // If the deleted invoice was the current one, select a new one or create one
-    if (currentInvoice.id === id) {
-      if (updatedInvoices.length > 0) {
-        setCurrentInvoice(updatedInvoices[0]);
-      } else {
-        handleNewInvoice(); 
-        // handleNewInvoice switches to editor, so we need to switch back if we are in the "notas" tab
-        setActiveTab('notas');
-      }
+    try {
+      await downloadInvoicePdf(
+        node,
+        getExportFilename(currentInvoice.clientName, 'pdf')
+      );
+    } catch (error) {
+      console.error('oops, something went wrong!', error);
+      toast({
+        variant: 'destructive',
+        title: 'Falha no PDF',
+        description: 'Não foi possível gerar o arquivo PDF.',
+      });
     }
-    
+  }, [currentInvoice.clientName, getExportFilename, toast]);
+
+  const handleSaveExport = useCallback(async () => {
+    const node = previewRef.current;
+    if (!node || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      const format = saveFormat;
+      let data: string;
+
+      if (format === 'pdf') {
+        const result = await generateInvoicePdfData(node);
+        data = result.dataUrl;
+      } else {
+        const result = await captureInvoiceImage(node);
+        data = result.dataUrl;
+      }
+
+      const saved: SavedExport = {
+        id: generateId(),
+        invoiceId: currentInvoice.id,
+        clientName: currentInvoice.clientName || 'sem-cliente',
+        invoiceNumber: currentInvoice.invoiceNumber,
+        format,
+        data,
+        createdAt: new Date().toISOString(),
+      };
+
+      setSavedExports((prev) => [saved, ...prev]);
+
+      setActiveTab('notas');
+
+      toast({
+        title: 'Salvo em Minhas Notas',
+        description: `Recibo salvo como ${format.toUpperCase()}.`,
+      });
+    } catch (error) {
+      console.error(error);
+      toast({
+        variant: 'destructive',
+        title: 'Falha ao salvar',
+        description: 'Não foi possível gerar e salvar o arquivo.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    currentInvoice.clientName,
+    currentInvoice.id,
+    currentInvoice.invoiceNumber,
+    isSaving,
+    saveFormat,
+    setSavedExports,
+    toast,
+  ]);
+
+  const handleClearInvoices = () => {
+    const newInvoice = createDefaultInvoice(companyName);
+    setInvoices([newInvoice]);
+    setCurrentInvoice(newInvoice);
+    setActiveTab('editor');
     toast({
-        title: 'Nota Apagada',
-        description: 'A nota de pagamento foi apagada com sucesso.',
+      title: 'Cache limpo',
+      description: 'Todos os rascunhos foram removidos do navegador.',
     });
-    setInvoiceToDelete(null);
   };
 
-  const openDeleteConfirmation = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setInvoiceToDelete(id);
+  const handleClearSavedExports = () => {
+    setSavedExports([]);
+    toast({
+      title: 'Notas apagadas',
+      description: 'Todos os arquivos salvos foram removidos de Minhas Notas.',
+    });
   };
 
-  const filteredInvoices = invoices.filter(invoice => 
-    (invoice.clientName && invoice.clientName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (invoice.invoiceNumber && invoice.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+  const handleDownloadSavedExport = (saved: SavedExport) => {
+    const link = document.createElement('a');
+    link.href = saved.data;
+    link.download = getExportFilename(saved.clientName, saved.format);
+    link.click();
+  };
+
+  const handleDeleteSavedExport = (id: string) => {
+    setSavedExports((prev) => prev.filter((item) => item.id !== id));
+    toast({
+      title: 'Nota removida',
+      description: 'Arquivo removido de Minhas Notas.',
+    });
+    setExportToDelete(null);
+  };
+
+  const filteredSavedExports = savedExports.filter(
+    (saved) =>
+      saved.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      saved.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (!isClient) {
-    return null; // Or a loading spinner
+    return null;
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       <header className="p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <h1 className="text-xl sm:text-2xl font-bold font-headline text-primary text-center">Gerador de Nota de Pagamento</h1>
+        <h1 className="text-xl sm:text-2xl font-bold font-headline text-primary text-center">
+          Gerador de Nota de Pagamento
+        </h1>
         <div className="flex gap-2">
-            <Button onClick={handleNewInvoice}><FilePlus /> Nova Nota</Button>
+          <Button onClick={handleNewInvoice}>
+            <FilePlus /> Nova Nota
+          </Button>
         </div>
       </header>
 
-      <main className="p-2 sm:p-4">
+      <main className="p-2 sm:p-4 max-w-[100vw] overflow-x-hidden">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-4 w-full">
-            <TabsTrigger value="editor" className="flex-1">Editor</TabsTrigger>
-            <TabsTrigger value="notas" className="flex-1">Minhas Notas</TabsTrigger>
+          <TabsList className="mb-4 w-full grid grid-cols-3">
+            <TabsTrigger value="editor">Editor</TabsTrigger>
+            <TabsTrigger value="notas">Minhas Notas</TabsTrigger>
+            <TabsTrigger value="config">
+              <Settings className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Configurações</span>
+            </TabsTrigger>
           </TabsList>
-          <TabsContent value="editor">
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-              <InvoiceEditor
-                key={currentInvoice.id} // Add key to force re-render on invoice change
-                invoice={currentInvoice}
-                onInvoiceChange={handleInvoiceChange}
-                logo={logo}
-                onLogoChange={setLogo}
-              />
-              <div id="invoice-preview-container">
-                <InvoicePreview ref={previewRef} invoice={currentInvoice} logo={logo} />
-                <div className='flex justify-center gap-2 mt-4'>
-                    <Button variant="outline" size="sm" onClick={handleDownloadImage} className="bg-green-600 text-white hover:bg-green-700 hover:text-white"><Download className="h-4 w-4 mr-2" />Gerar JPEG</Button>
-                    <Button variant="outline" size="sm" onClick={handleDownloadPdf} className="bg-green-600 text-white hover:bg-green-700 hover:text-white"><FileText className="h-4 w-4 mr-2" />Gerar PDF</Button>
+
+          <TabsContent value="editor" className="overflow-x-hidden">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 xl:gap-8 min-w-0">
+              <div className="min-w-0">
+                <InvoiceEditor
+                  key={currentInvoice.id}
+                  invoice={currentInvoice}
+                  onInvoiceChange={handleInvoiceChange}
+                />
+              </div>
+              <div id="invoice-preview-container" className="w-full min-w-0 flex flex-col items-center">
+                <div className="w-full flex justify-center overflow-x-auto pb-2">
+                  <InvoicePreview ref={previewRef} invoice={currentInvoice} logo={logo} />
+                </div>
+                <div className="flex flex-wrap justify-center gap-2 mt-4 no-print w-full">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveExport}
+                    disabled={isSaving}
+                    className="bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black border-yellow-600"
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {isSaving ? 'Salvando...' : 'Salvar'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadImage}
+                    className="bg-green-600 text-white hover:bg-green-700 hover:text-white"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Gerar JPEG
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadPdf}
+                    className="bg-green-600 text-white hover:bg-green-700 hover:text-white"
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Gerar PDF
+                  </Button>
                 </div>
               </div>
             </div>
           </TabsContent>
+
           <TabsContent value="notas">
-             <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                    placeholder="Buscar por cliente ou Ref..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                />
-             </div>
-             <ScrollArea className="h-[70vh]">
-                <div className="space-y-4">
-                {filteredInvoices.map((invoice) => (
-                    <Card key={invoice.id} className="cursor-pointer hover:border-primary relative group" onClick={() => selectInvoiceToEdit(invoice)}>
-                         <Button
-                            variant="destructive"
-                            size="icon"
-                            className="absolute -top-2 -right-2 z-10 hidden w-6 h-6 rounded-full group-hover:flex"
-                            onClick={(e) => openDeleteConfirmation(e, invoice.id)}
-                            >
-                            <X className="w-4 h-4" />
-                         </Button>
-                        <CardContent className="p-2 sm:p-4">
-                           <div className="transform scale-50 origin-top-left">
-                                <InvoicePreview 
-                                    invoice={invoice} 
-                                    logo={logo} 
-                                />
-                            </div>
-                        </CardContent>
-                    </Card>
-                ))}
-                </div>
-             </ScrollArea>
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por cliente ou Ref..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <ScrollArea className="h-[70vh]">
+              <div className="space-y-4 pr-2">
+                {filteredSavedExports.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-8 text-center text-muted-foreground">
+                      <p>Nenhuma nota salva ainda.</p>
+                      <p className="text-sm mt-2">
+                        Use o botão amarelo <strong>Salvar</strong> no editor para guardar JPEG ou PDF aqui.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  filteredSavedExports.map((saved) => (
+                    <SavedExportCard
+                      key={saved.id}
+                      saved={saved}
+                      onDownload={handleDownloadSavedExport}
+                      onDelete={(id) => setExportToDelete(id)}
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="config">
+            <SettingsPanel
+              logo={logo}
+              onLogoChange={setLogo}
+              invoices={invoices}
+              savedExports={savedExports}
+              onClearInvoices={handleClearInvoices}
+              onClearSavedExports={handleClearSavedExports}
+            />
           </TabsContent>
         </Tabs>
       </main>
-        <AlertDialog open={invoiceToDelete !== null} onOpenChange={(isOpen) => !isOpen && setInvoiceToDelete(null)}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                        Esta ação não pode ser desfeita. Isso apagará permanentemente a nota de pagamento.
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel onClick={(e) => { e.stopPropagation(); setInvoiceToDelete(null); }}>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={(e) => { e.stopPropagation(); if(invoiceToDelete) handleDeleteInvoice(invoiceToDelete); }}>Apagar</AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+
+      <AlertDialog
+        open={exportToDelete !== null}
+        onOpenChange={(isOpen) => !isOpen && setExportToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover nota salva?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O arquivo JPEG/PDF será removido permanentemente de Minhas Notas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setExportToDelete(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => exportToDelete && handleDeleteSavedExport(exportToDelete)}
+            >
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
 
 export default Page;
-
-    
