@@ -114,9 +114,9 @@ export function SettingsPanel({
 
       <Card>
         <CardHeader>
-          <CardTitle className="font-headline">Formato ao Salvar</CardTitle>
+          <CardTitle className="font-headline">Formato em Minhas Notas</CardTitle>
           <CardDescription>
-            Define se o botão amarelo &quot;Salvar&quot; guarda JPEG ou PDF em Minhas Notas.
+            Define se Baixar JPEG / Baixar PDF guarda JPEG ou PDF em Minhas Notas.
           </CardDescription>
         </CardHeader>
         <CardContent>

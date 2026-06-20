@@ -10,7 +10,6 @@ import {
   Download,
   FilePlus,
   FileText,
-  Save,
   Search,
   Settings,
 } from 'lucide-react';
@@ -205,7 +204,7 @@ const Page: FC = () => {
   }, []);
 
   const handleSaveExport = useCallback(
-    async (options?: { downloadFormat?: SaveFormat }) => {
+    async (options: { downloadFormat: SaveFormat }) => {
       const node = previewRef.current;
       if (!node || isSaveLocked) return;
 
@@ -254,15 +253,13 @@ const Page: FC = () => {
             ? 'queued'
             : 'synced';
 
-        if (options?.downloadFormat) {
-          const filename = getExportFilename(receiptLabel, options.downloadFormat);
-          if (options.downloadFormat === format) {
-            downloadDataUrl(data, filename);
-          } else if (options.downloadFormat === 'pdf') {
-            await downloadInvoicePdf(node, filename);
-          } else {
-            await downloadInvoiceJpeg(node, filename);
-          }
+        const filename = getExportFilename(receiptLabel, options.downloadFormat);
+        if (options.downloadFormat === format) {
+          downloadDataUrl(data, filename);
+        } else if (options.downloadFormat === 'pdf') {
+          await downloadInvoicePdf(node, filename);
+        } else {
+          await downloadInvoiceJpeg(node, filename);
         }
 
         setSaveSuccess({
@@ -387,16 +384,6 @@ const Page: FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => void handleSaveExport()}
-                    disabled={isSaveLocked}
-                    className="bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black border-yellow-600 disabled:opacity-70"
-                  >
-                    <Save className="h-4 w-4 mr-2" />
-                    {isSaving ? 'Salvando...' : 'Salvar'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
                     onClick={() => void handleSaveExport({ downloadFormat: 'jpeg' })}
                     disabled={isSaveLocked}
                     className="bg-green-600 text-white hover:bg-green-700 hover:text-white disabled:opacity-70"
@@ -436,7 +423,7 @@ const Page: FC = () => {
                     <CardContent className="p-8 text-center text-muted-foreground">
                       <p>Nenhuma nota salva ainda.</p>
                       <p className="text-sm mt-2">
-                        Use o botão amarelo <strong>Salvar</strong> no editor para guardar JPEG ou PDF aqui.
+                        Use <strong>Baixar JPEG</strong> ou <strong>Baixar PDF</strong> no editor para guardar aqui.
                       </p>
                     </CardContent>
                   </Card>
