@@ -1,10 +1,10 @@
 'use client';
 
-import { Download, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Download, Save, Trash2 } from 'lucide-react';
 import type { Invoice, SavedExport, SaveFormat } from '@/lib/types';
-import { DEFAULT_SAVE_FORMAT, NOVO_PLUS_VALUE, STORAGE_KEYS } from '@/lib/constants';
-import { useLocalStorage } from '@/hooks/use-local-storage';
-import { useDropdownLists } from '@/hooks/use-dropdown-lists';
+import { NOVO_PLUS_VALUE } from '@/lib/constants';
+import { loadSettingsSnapshot, saveSettingsSnapshot, type SettingsSnapshot } from '@/lib/settings-storage';
 import { LogoUploader } from '@/components/logo-uploader';
 import { SortableItemList } from '@/components/sortable-item-list';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,33 +22,58 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface SettingsPanelProps {
-  logo: string | null;
-  onLogoChange: (logo: string | null) => void;
   invoices: Invoice[];
   savedExports: SavedExport[];
   onClearInvoices: () => void;
   onClearSavedExports: () => void;
+  onSettingsSaved: (snapshot: SettingsSnapshot) => void;
+}
+
+function withoutNovo(items: string[]): string[] {
+  return items.filter((item) => item !== NOVO_PLUS_VALUE);
 }
 
 export function SettingsPanel({
-  logo,
-  onLogoChange,
   invoices,
   savedExports,
   onClearInvoices,
   onClearSavedExports,
+  onSettingsSaved,
 }: SettingsPanelProps) {
-  const { tipoItems, descricaoItems, empresaItems, deleteItem, reorderItems } = useDropdownLists();
-  const [saveFormat, setSaveFormat] = useLocalStorage<SaveFormat>(
-    STORAGE_KEYS.saveFormat,
-    DEFAULT_SAVE_FORMAT
-  );
+  const { toast } = useToast();
+  const [draft, setDraft] = useState<SettingsSnapshot>(() => loadSettingsSnapshot());
+  const [savedDraft, setSavedDraft] = useState<SettingsSnapshot>(() => loadSettingsSnapshot());
 
-  const tipoManageable = tipoItems.filter((item) => item !== NOVO_PLUS_VALUE);
-  const descricaoManageable = descricaoItems.filter((item) => item !== NOVO_PLUS_VALUE);
-  const empresaManageable = empresaItems.filter((item) => item !== NOVO_PLUS_VALUE);
+  useEffect(() => {
+    const snapshot = loadSettingsSnapshot();
+    setDraft(snapshot);
+    setSavedDraft(snapshot);
+  }, []);
+
+  const hasChanges = JSON.stringify(draft) !== JSON.stringify(savedDraft);
+
+  const updateList = (
+    key: 'tipoItems' | 'descricaoItems' | 'empresaItems',
+    updater: (items: string[]) => string[]
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      [key]: updater(withoutNovo(current[key])),
+    }));
+  };
+
+  const handleSaveSettings = () => {
+    saveSettingsSnapshot(draft);
+    setSavedDraft(draft);
+    onSettingsSaved(draft);
+    toast({
+      title: 'Configurações salvas',
+      description: 'Suas alterações foram aplicadas.',
+    });
+  };
 
   const handleDownloadDrafts = () => {
     const data = JSON.stringify(invoices, null, 2);
@@ -73,14 +98,17 @@ export function SettingsPanel({
   };
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto">
+    <div className="space-y-6 max-w-2xl mx-auto pb-8">
       <Card>
         <CardHeader>
           <CardTitle className="font-headline">Logotipo</CardTitle>
-          <CardDescription>Altere a imagem exibida nos recibos. Salva automaticamente no navegador.</CardDescription>
+          <CardDescription>Altere a imagem exibida nos recibos.</CardDescription>
         </CardHeader>
         <CardContent>
-          <LogoUploader logo={logo} onLogoChange={onLogoChange} />
+          <LogoUploader
+            logo={draft.logo}
+            onLogoChange={(logo) => setDraft((current) => ({ ...current, logo }))}
+          />
         </CardContent>
       </Card>
 
@@ -93,8 +121,10 @@ export function SettingsPanel({
         </CardHeader>
         <CardContent>
           <RadioGroup
-            value={saveFormat}
-            onValueChange={(val) => setSaveFormat(val as SaveFormat)}
+            value={draft.saveFormat}
+            onValueChange={(val) =>
+              setDraft((current) => ({ ...current, saveFormat: val as SaveFormat }))
+            }
             className="flex flex-col sm:flex-row gap-4"
           >
             <div className="flex items-center space-x-2">
@@ -118,9 +148,18 @@ export function SettingsPanel({
         </CardHeader>
         <CardContent>
           <SortableItemList
-            items={empresaManageable}
-            onDelete={(item) => deleteItem('empresa', item)}
-            onReorder={(from, to) => reorderItems('empresa', from, to)}
+            items={withoutNovo(draft.empresaItems)}
+            onDelete={(item) =>
+              updateList('empresaItems', (items) => items.filter((entry) => entry !== item))
+            }
+            onReorder={(from, to) =>
+              updateList('empresaItems', (items) => {
+                const reordered = [...items];
+                const [moved] = reordered.splice(from, 1);
+                reordered.splice(to, 0, moved);
+                return reordered;
+              })
+            }
             emptyMessage="Nenhuma empresa cadastrada. Use NOVO+ no editor para adicionar."
           />
         </CardContent>
@@ -135,9 +174,18 @@ export function SettingsPanel({
         </CardHeader>
         <CardContent>
           <SortableItemList
-            items={tipoManageable}
-            onDelete={(item) => deleteItem('tipo', item)}
-            onReorder={(from, to) => reorderItems('tipo', from, to)}
+            items={withoutNovo(draft.tipoItems)}
+            onDelete={(item) =>
+              updateList('tipoItems', (items) => items.filter((entry) => entry !== item))
+            }
+            onReorder={(from, to) =>
+              updateList('tipoItems', (items) => {
+                const reordered = [...items];
+                const [moved] = reordered.splice(from, 1);
+                reordered.splice(to, 0, moved);
+                return reordered;
+              })
+            }
           />
         </CardContent>
       </Card>
@@ -151,9 +199,18 @@ export function SettingsPanel({
         </CardHeader>
         <CardContent>
           <SortableItemList
-            items={descricaoManageable}
-            onDelete={(item) => deleteItem('descricao', item)}
-            onReorder={(from, to) => reorderItems('descricao', from, to)}
+            items={withoutNovo(draft.descricaoItems)}
+            onDelete={(item) =>
+              updateList('descricaoItems', (items) => items.filter((entry) => entry !== item))
+            }
+            onReorder={(from, to) =>
+              updateList('descricaoItems', (items) => {
+                const reordered = [...items];
+                const [moved] = reordered.splice(from, 1);
+                reordered.splice(to, 0, moved);
+                return reordered;
+              })
+            }
           />
         </CardContent>
       </Card>
@@ -248,6 +305,16 @@ export function SettingsPanel({
           </AlertDialog>
         </CardContent>
       </Card>
+
+      <div className="sticky bottom-0 bg-background/95 backdrop-blur border rounded-lg p-4 flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {hasChanges ? 'Alterações pendentes — clique em Salvar para aplicar.' : 'Tudo salvo.'}
+        </p>
+        <Button onClick={handleSaveSettings} disabled={!hasChanges} className="min-w-[140px]">
+          <Save className="h-4 w-4 mr-2" />
+          Salvar
+        </Button>
+      </div>
     </div>
   );
 }

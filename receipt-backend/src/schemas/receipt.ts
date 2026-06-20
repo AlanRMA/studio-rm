@@ -6,6 +6,15 @@ const requiredText = (message: string) =>
     .transform((value) => value.trim())
     .pipe(z.string().min(1, message));
 
+const nullableText = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value) => {
+    const trimmed = (value ?? '').trim();
+    return trimmed.length > 0 ? trimmed : null;
+  });
+
 export const receiptLineSchema = z.object({
   line_id: z.string().min(1),
   line_order: z.number().int().positive(),
@@ -37,10 +46,10 @@ export const ingestReceiptSchema = z
     receipt: z.object({
       id: z.string().uuid(),
       invoice_number: requiredText('invoice_number é obrigatório'),
-      client_name: requiredText('client_name é obrigatório'),
+      client_name: nullableText,
       service_type: z.string().optional(),
       issue_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      company_name: requiredText('company_name é obrigatório'),
+      company_name: nullableText,
       show_emitter: z.boolean(),
       emitter: z
         .object({
@@ -51,17 +60,33 @@ export const ingestReceiptSchema = z
         .nullable(),
       delivery_fee: z.number().min(0),
       adjustment: z.number(),
-      adjustment_kind: z.enum(['increase', 'discount']),
+      adjustment_kind: z.enum(['increase', 'discount', 'none']),
       lines: z.array(receiptLineSchema).min(1),
       totals: receiptTotalsSchema,
     }),
   })
   .superRefine((data, ctx) => {
+    if (!data.receipt.client_name && !data.receipt.company_name) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'client_name ou company_name deve estar preenchido',
+        path: ['receipt', 'client_name'],
+      });
+    }
+
     if (data.receipt.show_emitter && !data.receipt.emitter) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'emitter é obrigatório quando show_emitter é true',
         path: ['receipt', 'emitter'],
+      });
+    }
+
+    if (data.receipt.adjustment_kind === 'none' && data.receipt.adjustment !== 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'adjustment deve ser 0 quando adjustment_kind é none',
+        path: ['receipt', 'adjustment'],
       });
     }
   });

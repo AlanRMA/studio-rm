@@ -2,7 +2,7 @@
 'use client';
 
 import type { FC } from 'react';
-import { forwardRef, useCallback, useEffect, useImperativeHandle } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PlusCircle, Trash2 } from 'lucide-react';
@@ -39,11 +39,12 @@ export interface InvoiceEditorHandle {
 interface InvoiceEditorProps {
   invoice: Invoice;
   onInvoiceChange: (invoice: Invoice) => void;
+  listsRevision?: number;
 }
 
 export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>(
-  function InvoiceEditor({ invoice, onInvoiceChange }, ref) {
-  const { tipoItems, descricaoItems, empresaItems, addItem } = useDropdownLists();
+  function InvoiceEditor({ invoice, onInvoiceChange, listsRevision = 0 }, ref) {
+  const { tipoItems, descricaoItems, empresaItems, addItem } = useDropdownLists(listsRevision);
   const legacyClearValues = [...LEGACY_PLACEHOLDER_VALUES];
 
   const form = useForm<Invoice>({
@@ -66,7 +67,17 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
 
   const showEmitter = form.watch('showEmitter');
   const adjustmentValue = form.watch('adjustment');
-  const adjustmentKind = getAdjustmentKind(adjustmentValue || 0);
+  const [selectedAdjustmentKind, setSelectedAdjustmentKind] = useState<AdjustmentKind>('none');
+  const adjustmentMagnitude = getAdjustmentMagnitude(adjustmentValue || 0);
+  const activeAdjustmentKind =
+    adjustmentMagnitude === 0 ? selectedAdjustmentKind : getAdjustmentKind(adjustmentValue || 0);
+
+  useEffect(() => {
+    const magnitude = getAdjustmentMagnitude(invoice.adjustment || 0);
+    setSelectedAdjustmentKind(
+      magnitude === 0 ? 'none' : getAdjustmentKind(invoice.adjustment || 0)
+    );
+  }, [invoice.id, invoice.adjustment]);
 
   useImperativeHandle(ref, () => ({
     validateForSave: async () => {
@@ -92,20 +103,30 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
   }, [form, onInvoiceChange]);
 
   const setAdjustmentKind = (kind: AdjustmentKind) => {
-    const magnitude = getAdjustmentMagnitude(form.getValues('adjustment'));
-    form.setValue('adjustment', applyAdjustmentSign(magnitude, kind), {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
+    setSelectedAdjustmentKind(kind);
+    if (kind === 'none') {
+      form.setValue('adjustment', 0, { shouldDirty: true, shouldValidate: true });
+    } else {
+      const magnitude = getAdjustmentMagnitude(form.getValues('adjustment'));
+      form.setValue('adjustment', applyAdjustmentSign(magnitude, kind), {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
     publishInvoiceChange();
   };
 
-  const handleAdjustmentInput = (magnitude: number, kind: AdjustmentKind) => {
-    const signedValue = applyAdjustmentSign(magnitude, kind);
-    form.setValue('adjustment', signedValue, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
+  const handleAdjustmentInput = (magnitude: number) => {
+    if (activeAdjustmentKind === 'none' && magnitude === 0) {
+      form.setValue('adjustment', 0, { shouldDirty: true, shouldValidate: true });
+    } else {
+      const kind = activeAdjustmentKind === 'none' ? 'increase' : activeAdjustmentKind;
+      setSelectedAdjustmentKind(kind);
+      form.setValue('adjustment', applyAdjustmentSign(magnitude, kind), {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
     publishInvoiceChange();
   };
 
@@ -482,10 +503,19 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
                     <Button
                       type="button"
                       size="sm"
-                      variant={adjustmentKind === 'increase' ? 'default' : 'outline'}
+                      variant={activeAdjustmentKind === 'none' ? 'default' : 'outline'}
+                      className="flex-1"
+                      onClick={() => setAdjustmentKind('none')}
+                    >
+                      Valor integral
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={activeAdjustmentKind === 'increase' ? 'default' : 'outline'}
                       className={cn(
                         'flex-1',
-                        adjustmentKind === 'increase' &&
+                        activeAdjustmentKind === 'increase' &&
                           'bg-green-600 hover:bg-green-700 text-white border-green-600'
                       )}
                       onClick={() => setAdjustmentKind('increase')}
@@ -495,10 +525,10 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
                     <Button
                       type="button"
                       size="sm"
-                      variant={adjustmentKind === 'discount' ? 'default' : 'outline'}
+                      variant={activeAdjustmentKind === 'discount' ? 'default' : 'outline'}
                       className={cn(
                         'flex-1',
-                        adjustmentKind === 'discount' &&
+                        activeAdjustmentKind === 'discount' &&
                           'bg-red-600 hover:bg-red-700 text-white border-red-600'
                       )}
                       onClick={() => setAdjustmentKind('discount')}
@@ -506,43 +536,51 @@ export const InvoiceEditor = forwardRef<InvoiceEditorHandle, InvoiceEditorProps>
                       Desconto (-)
                     </Button>
                   </div>
-                  <FormLabel
-                    className={cn(
-                      'font-semibold',
-                      adjustmentKind === 'increase' ? 'text-green-600' : 'text-red-600'
-                    )}
-                  >
-                    {adjustmentKind === 'increase' ? 'Acréscimo (+)' : 'Desconto (-)'}
-                  </FormLabel>
-                  <FormControl>
-                    <div className="relative">
-                      <span
+                  {activeAdjustmentKind !== 'none' ? (
+                    <>
+                      <FormLabel
                         className={cn(
-                          'absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-sm',
-                          adjustmentKind === 'increase' ? 'text-green-600' : 'text-red-600'
+                          'font-semibold',
+                          activeAdjustmentKind === 'increase' ? 'text-green-600' : 'text-red-600'
                         )}
                       >
-                        {adjustmentKind === 'increase' ? '+' : '-'}
-                      </span>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="0,00"
-                        className="pl-8"
-                        value={getAdjustmentMagnitude(field.value)}
-                        onChange={(e) => {
-                          const parsed = parseFloat(e.target.value);
-                          const magnitude = isNaN(parsed) ? 0 : Math.max(0, parsed);
-                          handleAdjustmentInput(magnitude, adjustmentKind);
-                        }}
-                      />
-                    </div>
-                  </FormControl>
-                  <FormDescription>
-                    Digite apenas o valor numérico. O sinal {adjustmentKind === 'increase' ? '+' : '-'} é aplicado
-                    automaticamente.
-                  </FormDescription>
+                        {activeAdjustmentKind === 'increase' ? 'Acréscimo (+)' : 'Desconto (-)'}
+                      </FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <span
+                            className={cn(
+                              'absolute left-3 top-1/2 -translate-y-1/2 font-semibold text-sm',
+                              activeAdjustmentKind === 'increase' ? 'text-green-600' : 'text-red-600'
+                            )}
+                          >
+                            {activeAdjustmentKind === 'increase' ? '+' : '-'}
+                          </span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="0,00"
+                            className="pl-8"
+                            value={adjustmentMagnitude}
+                            onChange={(e) => {
+                              const parsed = parseFloat(e.target.value);
+                              const magnitude = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                              handleAdjustmentInput(magnitude);
+                            }}
+                          />
+                        </div>
+                      </FormControl>
+                      <FormDescription>
+                        Digite apenas o valor numérico. O sinal{' '}
+                        {activeAdjustmentKind === 'increase' ? '+' : '-'} é aplicado automaticamente.
+                      </FormDescription>
+                    </>
+                  ) : (
+                    <FormDescription>
+                      Sem acréscimo nem desconto — o total usa apenas subtotal e taxa de entrega.
+                    </FormDescription>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}

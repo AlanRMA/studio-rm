@@ -24,11 +24,11 @@ export const invoiceSchema = z
   .object({
     id: z.string(),
     invoiceNumber: requiredText('Número da nota é obrigatório.'),
-    clientName: requiredText('Nome do cliente é obrigatório.'),
+    clientName: z.string().transform((value) => value.trim()),
     service: z.string().optional(),
     issueDate: requiredText('Data de emissão é obrigatória.'),
     items: z.array(invoiceItemSchema).min(1, 'Pelo menos um item é obrigatório.'),
-    companyName: requiredText('Nome da empresa é obrigatório.'),
+    companyName: z.string().transform((value) => value.trim()),
     showEmitter: z.boolean().default(false),
     emitterDocumentType: z.enum(['cpf', 'cnpj']).nullable().default(null),
     pricePerMeter: z.coerce
@@ -39,6 +39,14 @@ export const invoiceSchema = z
     adjustment: z.coerce.number({ invalid_type_error: 'Ajuste inválido' }).default(0),
   })
   .superRefine((data, ctx) => {
+    if (!data.clientName && !data.companyName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Informe Empresa do Cliente ou Nome do Cliente.',
+        path: ['clientName'],
+      });
+    }
+
     if (data.showEmitter && !data.emitterDocumentType) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

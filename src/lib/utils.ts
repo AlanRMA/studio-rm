@@ -12,9 +12,10 @@ export function formatCurrency(amount: number) {
   }).format(amount);
 }
 
-export type AdjustmentKind = 'increase' | 'discount';
+export type AdjustmentKind = 'increase' | 'discount' | 'none';
 
 export function getAdjustmentKind(adjustment: number): AdjustmentKind {
+  if (!adjustment || adjustment === 0) return 'none';
   return adjustment < 0 ? 'discount' : 'increase';
 }
 
@@ -23,14 +24,15 @@ export function getAdjustmentMagnitude(adjustment: number): number {
 }
 
 export function applyAdjustmentSign(magnitude: number, kind: AdjustmentKind): number {
+  if (kind === 'none') return 0;
   const value = Math.abs(magnitude || 0);
   return kind === 'discount' ? -value : value;
 }
 
 export function formatSignedAdjustment(adjustment: number): string {
-  const magnitude = getAdjustmentMagnitude(adjustment);
-  if (magnitude === 0) return formatCurrency(0);
   const kind = getAdjustmentKind(adjustment);
+  if (kind === 'none') return formatCurrency(0);
+  const magnitude = getAdjustmentMagnitude(adjustment);
   const formatted = formatCurrency(magnitude);
   return kind === 'increase' ? `+ ${formatted}` : `- ${formatted}`;
 }

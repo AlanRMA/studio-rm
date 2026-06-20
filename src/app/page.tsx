@@ -99,10 +99,11 @@ const Page: FC = () => {
   const { toast } = useToast();
   const [logo, setLogo] = useLocalStorage<string | null>(STORAGE_KEYS.logo, null);
   const [invoices, setInvoices] = useLocalStorage<Invoice[]>(STORAGE_KEYS.invoices, []);
-  const [saveFormat] = useLocalStorage<SaveFormat>(
+  const [saveFormat, setSaveFormat] = useLocalStorage<SaveFormat>(
     STORAGE_KEYS.saveFormat,
     DEFAULT_SAVE_FORMAT
   );
+  const [settingsRevision, setSettingsRevision] = useState(0);
   const [savedExports, setSavedExports] = useLocalStorage<SavedExport[]>(
     STORAGE_KEYS.savedExports,
     []
@@ -306,6 +307,15 @@ const Page: FC = () => {
     toast,
   ]);
 
+  const handleSettingsSaved = useCallback(
+    (snapshot: { logo: string | null; saveFormat: SaveFormat }) => {
+      setLogo(snapshot.logo);
+      setSaveFormat(snapshot.saveFormat);
+      setSettingsRevision((value) => value + 1);
+    },
+    [setLogo, setSaveFormat]
+  );
+
   const handleClearInvoices = () => {
     const newInvoice = createDefaultInvoice();
     setInvoices([newInvoice]);
@@ -389,6 +399,7 @@ const Page: FC = () => {
                   key={currentInvoice.id}
                   invoice={currentInvoice}
                   onInvoiceChange={handleInvoiceChange}
+                  listsRevision={settingsRevision}
                 />
               </div>
               <div id="invoice-preview-container" className="w-full min-w-0 flex flex-col items-center">
@@ -466,12 +477,11 @@ const Page: FC = () => {
 
           <TabsContent value="config">
             <SettingsPanel
-              logo={logo}
-              onLogoChange={setLogo}
               invoices={invoices}
               savedExports={savedExports}
               onClearInvoices={handleClearInvoices}
               onClearSavedExports={handleClearSavedExports}
+              onSettingsSaved={handleSettingsSaved}
             />
           </TabsContent>
         </Tabs>

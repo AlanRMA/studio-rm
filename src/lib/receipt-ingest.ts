@@ -15,10 +15,10 @@ export interface ReceiptIngestPayload {
   receipt: {
     id: string;
     invoice_number: string;
-    client_name: string;
+    client_name: string | null;
     service_type?: string;
     issue_date: string;
-    company_name: string;
+    company_name: string | null;
     show_emitter: boolean;
     emitter: {
       document_type: 'cpf' | 'cnpj';
@@ -27,7 +27,7 @@ export interface ReceiptIngestPayload {
     } | null;
     delivery_fee: number;
     adjustment: number;
-    adjustment_kind: 'increase' | 'discount';
+    adjustment_kind: 'increase' | 'discount' | 'none';
     lines: Array<{
       line_id: string;
       line_order: number;
@@ -79,10 +79,10 @@ export function buildReceiptIngestPayload(
     receipt: {
       id: invoice.id,
       invoice_number: invoice.invoiceNumber,
-      client_name: invoice.clientName.trim(),
+      client_name: invoice.clientName.trim() || null,
       service_type: invoice.service?.trim() || undefined,
       issue_date: invoice.issueDate,
-      company_name: invoice.companyName.trim(),
+      company_name: invoice.companyName.trim() || null,
       show_emitter: invoice.showEmitter,
       emitter: buildEmitter(invoice),
       delivery_fee: invoice.deliveryFee,

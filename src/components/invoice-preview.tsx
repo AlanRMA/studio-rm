@@ -81,8 +81,22 @@ export const InvoicePreview = forwardRef<HTMLDivElement, InvoicePreviewProps>(({
 
         <div className="grid grid-cols-2 gap-8 mb-8">
           <div className="min-w-0">
-            <p className="text-xs text-gray-500 mb-1">POR CLIENTE</p>
-            <p className="font-bold text-2xl break-words">{invoice.clientName || 'Nome do Cliente'}</p>
+            {invoice.companyName ? (
+              <>
+                <p className="text-xs text-gray-500 mb-1">EMPRESA DO CLIENTE</p>
+                <p className="font-bold text-xl break-words">{invoice.companyName}</p>
+              </>
+            ) : null}
+            {invoice.clientName ? (
+              <>
+                <p className={`text-xs text-gray-500 mb-1 ${invoice.companyName ? 'mt-3' : ''}`}>
+                  {invoice.companyName ? 'CONTATO' : 'POR CLIENTE'}
+                </p>
+                <p className="font-bold text-2xl break-words">{invoice.clientName}</p>
+              </>
+            ) : invoice.companyName ? null : (
+              <p className="font-bold text-2xl break-words text-gray-400">Cliente</p>
+            )}
           </div>
           <div className="text-right min-w-0">
             <p className="text-xs text-gray-500 mb-1">TIPO DE SERVIÇO</p>
@@ -139,7 +153,7 @@ export const InvoicePreview = forwardRef<HTMLDivElement, InvoicePreviewProps>(({
                 <span>{formatCurrency(deliveryFee)}</span>
               </div>
             )}
-            {adjustment !== 0 && (
+            {getAdjustmentKind(adjustment) !== 'none' && (
               <div className="flex justify-between text-sm text-black">
                 <span>
                   {getAdjustmentKind(adjustment) === 'increase' ? 'Acréscimo' : 'Desconto'}

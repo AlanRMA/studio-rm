@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocalStorage } from '@/hooks/use-local-storage';
+import { loadSettingsSnapshot } from '@/lib/settings-storage';
 import {
   DEFAULT_DESCRICAO_ITEMS,
   DEFAULT_EMPRESA_ITEMS,
@@ -77,7 +78,7 @@ const LIST_CONFIG = {
   },
 } as const;
 
-export function useDropdownLists() {
+export function useDropdownLists(reloadToken = 0) {
   const [tipoItems, setTipoItems] = useLocalStorage<string[]>(
     STORAGE_KEYS.tipoList,
     ensureNovoPlusLast(DEFAULT_TIPO_ITEMS)
@@ -90,6 +91,16 @@ export function useDropdownLists() {
     STORAGE_KEYS.empresaList,
     getInitialEmpresaItems()
   );
+  const [, setReloadCounter] = useState(0);
+
+  useEffect(() => {
+    if (reloadToken === 0) return;
+    const snapshot = loadSettingsSnapshot();
+    setTipoItems(snapshot.tipoItems);
+    setDescricaoItems(snapshot.descricaoItems);
+    setEmpresaItems(snapshot.empresaItems);
+    setReloadCounter((value) => value + 1);
+  }, [reloadToken, setDescricaoItems, setEmpresaItems, setTipoItems]);
 
   const getListState = useCallback(
     (list: DropdownListType) => {
