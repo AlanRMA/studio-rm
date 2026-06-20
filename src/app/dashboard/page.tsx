@@ -26,6 +26,11 @@ import {
   fetchSummary,
   fetchTopClients,
 } from '@/lib/analytics-api';
+import {
+  formatCacheAge,
+  readDashboardCache,
+  writeDashboardCache,
+} from '@/lib/dashboard-cache';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -153,8 +158,9 @@ export default function DashboardPage() {
   const [topByCount, setTopByCount] = useState<ClientRanking[]>([]);
   const [topByRevenue, setTopByRevenue] = useState<ClientRanking[]>([]);
   const [trend, setTrend] = useState<RevenueTrendPoint[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cacheLabel, setCacheLabel] = useState<string | null>(null);
 
   const baseFilters = useMemo(() => getDateRange(preset), [preset]);
   const filters = useMemo<AnalyticsFilters>(
@@ -165,31 +171,78 @@ export default function DashboardPage() {
     [baseFilters, clientFilter]
   );
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [summaryRes, countRes, revenueRes, trendRes, clientsRes] = await Promise.all([
-        fetchSummary(filters),
-        fetchTopClients(filters, 'count', TOP_LIMIT),
-        fetchTopClients(filters, 'revenue', TOP_LIMIT),
-        fetchRevenueTrend(filters, granularity),
-        fetchClientOptions(baseFilters),
-      ]);
-      setSummary(summaryRes.summary);
-      setTopByCount(countRes.clients);
-      setTopByRevenue(revenueRes.clients);
-      setTrend(trendRes.trend);
-      setClientOptions(clientsRes.clients);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao carregar');
-    } finally {
-      setLoading(false);
-    }
-  }, [filters, baseFilters, granularity]);
+  const applySnapshot = useCallback(
+    (snapshot: ReturnType<typeof readDashboardCache>) => {
+      if (!snapshot) return false;
+      setSummary(snapshot.summary);
+      setTopByCount(snapshot.topByCount);
+      setTopByRevenue(snapshot.topByRevenue);
+      setTrend(snapshot.trend);
+      setClientOptions(snapshot.clientOptions);
+      setCacheLabel(formatCacheAge(snapshot.savedAt));
+      return true;
+    },
+    []
+  );
+
+  const loadDashboard = useCallback(
+    async (options?: { force?: boolean }) => {
+      const cached = readDashboardCache(filters, granularity);
+      const hasCache = applySnapshot(cached);
+
+      if (!options?.force && hasCache) {
+        setError(null);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const [summaryRes, countRes, revenueRes, trendRes, clientsRes] = await Promise.all([
+          fetchSummary(filters),
+          fetchTopClients(filters, 'count', TOP_LIMIT),
+          fetchTopClients(filters, 'revenue', TOP_LIMIT),
+          fetchRevenueTrend(filters, granularity),
+          fetchClientOptions(baseFilters),
+        ]);
+
+        const savedAt = new Date().toISOString();
+        const snapshot = {
+          savedAt,
+          filters,
+          granularity,
+          summary: summaryRes.summary,
+          topByCount: countRes.clients,
+          topByRevenue: revenueRes.clients,
+          trend: trendRes.trend,
+          clientOptions: clientsRes.clients,
+        };
+
+        setSummary(snapshot.summary);
+        setTopByCount(snapshot.topByCount);
+        setTopByRevenue(snapshot.topByRevenue);
+        setTrend(snapshot.trend);
+        setClientOptions(snapshot.clientOptions);
+        setCacheLabel(formatCacheAge(savedAt));
+        writeDashboardCache(snapshot);
+      } catch (err) {
+        if (!hasCache) {
+          setError(err instanceof Error ? err.message : 'Erro ao carregar');
+        } else {
+          setError(
+            (err instanceof Error ? err.message : 'Erro ao atualizar') +
+              ' — exibindo dados em cache.'
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filters, baseFilters, granularity, applySnapshot]
+  );
 
   useEffect(() => {
-    loadDashboard();
+    void loadDashboard();
   }, [loadDashboard]);
 
   const trendData = trend.map((point) => ({
@@ -248,8 +301,25 @@ export default function DashboardPage() {
             </Tabs>
           </div>
 
-          <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={loadDashboard} disabled={loading}>
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {cacheLabel && (
+            <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
+              {cacheLabel}
+            </span>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 text-xs gap-1.5"
+            onClick={() => void loadDashboard({ force: true })}
+            disabled={loading}
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Atualizar
           </Button>
         </div>
       </header>
@@ -260,9 +330,14 @@ export default function DashboardPage() {
         )}
 
         {loading && !summary ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" />
-            Carregando...
+          <div className="flex-1 flex flex-col items-center justify-center text-sm text-muted-foreground gap-2">
+            <div className="flex items-center">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Carregando...
+            </div>
+            <p className="text-xs text-center max-w-xs">
+              Se o backend estiver dormindo no Render, pode levar até 1 minuto.
+            </p>
           </div>
         ) : (
           summary && (
